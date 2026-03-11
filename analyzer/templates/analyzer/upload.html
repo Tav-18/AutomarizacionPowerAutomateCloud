@@ -1,0 +1,237 @@
+{% extends "analyzer/base.html" %}
+{% block title %}Subir Solution ZIP{% endblock %}
+
+{% block content %}
+  <div class="card large-card">
+    <div class="card-inner">
+
+      <div class="card">
+        <div class="upload-head">
+          <div>
+            <h2 class="upload-title">Subir solution.zip</h2>
+            <div class="upload-sub">
+              Cargar un Solution ZIP de Power Automate Cloud para generar reporte de buenas prácticas.
+            </div>
+          </div>
+
+          <div class="upload-badges">
+            <span class="badge-mini">Cloud</span>
+            <span class="badge-mini">Solution ZIP</span>
+          </div>
+        </div>
+
+        <div class="hr"></div>
+
+        <form method="post" enctype="multipart/form-data" class="form" id="uploadForm">
+          {% csrf_token %}
+
+          <div class="field">
+            <div class="label-row">
+              <label class="label" for="id_solution_zip">Solution ZIP (.zip)</label>
+              <span class="required-chip">Requerido</span>
+            </div>
+
+            <!-- Uploader premium -->
+            <div class="uploader" id="uploader">
+              <!-- input real, oculto -->
+              <input
+                id="id_solution_zip"
+                class="native-file"
+                type="file"
+                name="solution_zip"
+                accept=".zip,application/zip"
+                required
+              />
+
+              <!-- UI visible (click) -->
+              <button type="button" class="file-ui" id="fileUi" aria-label="Seleccionar solution.zip">
+                <span class="file-ui__btn">Seleccionar archivo</span>
+                <span class="file-ui__text" id="fileHint">Arrastra y suelta tu solution.zip aquí o haz clic para buscar</span>
+              </button>
+
+              <!-- orb / icon -->
+              <button type="button" class="upload-orb" id="orbBtn" aria-label="Elegir archivo">
+                <span class="cloud"></span>
+                <span class="arrow"></span>
+              </button>
+            </div>
+
+            <!-- “pill” con el archivo seleccionado -->
+            <div class="file-pill file-pill--with-x" id="filePill" hidden>
+              <div class="meta">
+                <div class="name" id="fileName">—</div>
+                <div class="size" id="fileSize">—</div>
+              </div>
+
+              <span class="badge-mini">Listo</span>
+
+              <button type="button" class="pill-x" id="clearBtn" aria-label="Quitar archivo">×</button>
+            </div>
+
+            <div class="help">
+              Tip: si tu solution contiene muchos flows, el análisis puede tardar algunos segundos.
+            </div>
+          </div>
+
+          <div class="field">
+  <div class="label-row">
+    <label class="label" for="id_project_id">Project ID</label>
+    <span class="required-chip">Required</span>
+  </div>
+
+  <div class="input-wrap input-with-icon">
+    <span class="input-icon">#</span>
+    <input type="text" id="id_project_id" name="project_id" placeholder="e.g., NVB.008 / TYM / Project-123" required>
+  </div>
+</div>
+
+          <div class="cta-wrap">
+            <div class="cta-row">
+              <div class="cta-spacer"></div>
+              <button class="btn btn-primary" type="submit" id="analyzeBtn" disabled>Analizar</button>
+              <div class="cta-spacer"></div>
+            </div>
+          </div>
+        </form>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Overlay loading (opcional, ya tienes CSS) -->
+  <div class="beecker-overlay" id="overlay">
+    <div class="beecker-overlay-card">
+      <div class="beecker-loader-row">
+        <div class="beecker-spinner"></div>
+        <div>
+          <p class="beecker-loader-title">Analizando solution.zip</p>
+          <p class="beecker-loader-sub">Aplicando reglas y generando reporte PDF…</p>
+          <div class="beecker-progress-bar">
+            <div class="beecker-progress" id="progress"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    (function () {
+      const input = document.getElementById("id_solution_zip");
+      const uploader = document.getElementById("uploader");
+      const fileUi = document.getElementById("fileUi");
+      const orbBtn = document.getElementById("orbBtn");
+      const filePill = document.getElementById("filePill");
+      const fileName = document.getElementById("fileName");
+      const fileSize = document.getElementById("fileSize");
+      const clearBtn = document.getElementById("clearBtn");
+      const analyzeBtn = document.getElementById("analyzeBtn");
+      const overlay = document.getElementById("overlay");
+      const progress = document.getElementById("progress");
+
+      function fmtBytes(bytes) {
+        if (!bytes && bytes !== 0) return "";
+        const units = ["B", "KB", "MB", "GB"];
+        let i = 0;
+        let val = bytes;
+        while (val >= 1024 && i < units.length - 1) {
+          val /= 1024;
+          i++;
+        }
+        return `${val.toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
+      }
+
+      function setFileUI(file) {
+        if (!file) {
+          filePill.hidden = true;
+          analyzeBtn.disabled = true;
+          return;
+        }
+        fileName.textContent = file.name;
+        fileSize.textContent = fmtBytes(file.size);
+        filePill.hidden = false;
+        analyzeBtn.disabled = false;
+      }
+
+      function openPicker() {
+        input.click();
+      }
+
+      // Click en UI o en orb abre picker
+      fileUi.addEventListener("click", openPicker);
+      orbBtn.addEventListener("click", openPicker);
+
+      // Change
+      input.addEventListener("change", () => {
+        const file = input.files && input.files[0];
+        setFileUI(file);
+      });
+
+// Clear (fix: que quite el nombre y oculte el pill)
+clearBtn.setAttribute("type", "button");
+clearBtn.addEventListener("click", (e) => {
+  e.preventDefault();
+  e.stopPropagation();
+
+  // Limpia input
+  input.value = "";
+
+  // Resetea UI (esto fuerza que desaparezca el nombre)
+  fileName.textContent = "—";
+  fileSize.textContent = "—";
+  filePill.hidden = true;
+  analyzeBtn.disabled = true;
+
+  // Resetea hint del uploader (opcional, pero recomendado)
+  const fileHint = document.getElementById("fileHint");
+  if (fileHint) {
+    fileHint.textContent = "Arrastra y suelta tu solution.zip aquí o haz clic para buscar";
+  }
+});
+
+      // Drag & drop
+      ["dragenter", "dragover"].forEach(evt => {
+        uploader.addEventListener(evt, (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          uploader.classList.add("is-dragover");
+        });
+      });
+
+      ["dragleave", "drop"].forEach(evt => {
+        uploader.addEventListener(evt, (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          uploader.classList.remove("is-dragover");
+        });
+      });
+
+      uploader.addEventListener("drop", (e) => {
+        const dt = e.dataTransfer;
+        if (!dt || !dt.files || dt.files.length === 0) return;
+
+        const file = dt.files[0];
+        if (!file.name.toLowerCase().endsWith(".zip")) {
+          alert("Por favor, selecciona un archivo .zip");
+          return;
+        }
+
+        // Asignar archivo al input
+        input.files = dt.files;
+        setFileUI(file);
+      });
+
+      // Loading overlay (simulado)
+      document.getElementById("uploadForm").addEventListener("submit", () => {
+        overlay.classList.add("show");
+        let p = 5;
+        progress.style.width = p + "%";
+        const timer = setInterval(() => {
+          p = Math.min(95, p + 7);
+          progress.style.width = p + "%";
+        }, 250);
+        // Cuando navegue a resultados se quita solo
+        setTimeout(() => clearInterval(timer), 6000);
+      });
+    })();
+  </script>
+{% endblock %}

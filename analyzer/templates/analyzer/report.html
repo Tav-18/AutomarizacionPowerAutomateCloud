@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <title>Reporte — Power Automate Analyzer</title>
+  <style>{{ inline_css|safe }}</style>
+</head>
+<body>
+  <div class="page">
+
+    <div class="header">
+      <div class="header-top">
+        <h1 class="header-title">Power Automate Best Practices Analyzer</h1>
+        <div class="header-sub">Beecker · Reporte generado automáticamente</div>
+      </div>
+
+      <div class="header-meta">
+        <div class="kv">Run ID: <b>{{ run_id }}</b></div>
+        <div class="badges">
+          <span class="badge">Cloud · Solution ZIP</span>
+          <span class="badge">Score: {{ score }}/100</span>
+          <span class="badge">Estado: {{ sem }}</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Resumen</div>
+
+      <div class="metrics">
+        <div class="metric">
+          <div class="metric-label">ERROR</div>
+          <div class="metric-value">{{ e }}</div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">WARNING</div>
+          <div class="metric-value">{{ w }}</div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">INFO</div>
+          <div class="metric-value">{{ i }}</div>
+        </div>
+      </div>
+
+      <div class="hr"></div>
+
+      <div class="kv">
+        Inventario: JSON encontrados {{ total_json }} · Flows parseados {{ total_flows }} · Acciones {{ total_actions }}
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Incidencias</div>
+      <div class="kv">Severidad · Regla · Flow · Actividad · Ruta JSON · Evidencia · Fix</div>
+
+      <div class="hr"></div>
+
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Severidad</th>
+            <th>Regla</th>
+            <th>Flow</th>
+            <th>Actividad</th>
+            <th>Ruta JSON</th>
+            <th>Evidencia</th>
+            <th>Fix</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for f in findings %}
+          <tr>
+            <td>
+              {% if f.severity == "ERROR" %}
+                <span class="pill err">ERROR</span>
+              {% elif f.severity == "WARNING" %}
+                <span class="pill warn">WARNING</span>
+              {% else %}
+                <span class="pill info">INFO</span>
+              {% endif %}
+            </td>
+            <td><b>{{ f.rule_id }}</b></td>
+            <td>{{ f.flow_name }}</td>
+            <td>{{ f.action_name }}</td>
+            <td><code>{{ f.json_path }}</code></td>
+            <td><span class="small">{{ f.evidence }}</span></td>
+            <td><span class="small">{{ f.fix }}</span></td>
+          </tr>
+          {% empty %}
+          <tr>
+            <td colspan="7" class="small">No se detectaron incidencias con las reglas actuales.</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+  </div>
+</body>
+</html>
