@@ -75,7 +75,7 @@
           <div class="cta-spacer"></div>
 
           <div style="display:flex; gap:10px; justify-content:center; flex-wrap:wrap;">
-            <a class="btn btn-secondary" href="{% url 'download_pdf' run_id %}">Download PDF</a>
+            <a class="btn btn-secondary" href="{% url 'download_excel' run_id %}">Download Excel</a>
             <a class="btn btn-primary" href="{% url 'upload' %}">Analyze another ZIP</a>
           </div>
 
@@ -95,53 +95,48 @@
       <div class="card card-tight">
         <h2 class="upload-title" style="margin-bottom:8px;">Findings (max 500)</h2>
         <div class="upload-sub" style="margin-bottom:14px;">
-          Columns: Severity · Broken Rule · Action · Location (Flow) · Error Detail · Proposed Fix · JSON Location
+          Columns: Severity · Broken Rule · Target (Flow / Activity) · Error Detail
         </div>
 
         <div class="findings-scroll">
-  <table class="findings-table">
-    <thead>
-      <tr>
-        <th>Severity</th>
-        <th>Broken Rule</th>
-        <th>Action</th>
-        <th>Location (Flow)</th>
-        <th>Error Detail</th>
-        <th>JSON Location</th>
-      </tr>
-    </thead>
+          <table class="findings-table">
+            <thead>
+              <tr>
+                <th>Severity</th>
+                <th>Broken Rule</th>
+                <th>Target (Flow / Activity)</th>
+                <th>Error Detail</th>
+              </tr>
+            </thead>
 
-    <tbody>
-      {% for f in findings %}
-      <tr>
-        <!-- ✅ sin "L" -->
-        <td><b>{{ f.severity_level }}</b></td>
+            <tbody>
+              {% for f in findings %}
+              <tr>
+                <td><b>{{ f.severity_level }}</b></td>
 
-        <td><div style="font-weight:800;">{{ f.rule_name }}</div></td>
+                <td>
+                  <div style="font-weight:800;">{{ f.rule_name }}</div>
+                </td>
 
-        <td class="cell-wrap">{{ f.action_name }}</td>
+                <td class="cell-wrap">
+                  {{ f.target_pretty }}
+                </td>
 
-        <td class="cell-wrap">{{ f.flow_name }}</td>
-        
-
-        <!-- ✅ solo reason / why flagged (sin Evidence) -->
-        <td>
-          <div style="font-weight:700;">Why flagged</div>
-          <div style="margin-top:4px;"><small>{{ f.reason }}</small></div>
-        </td>
-
-        <td class="cell-json">{{ f.json_path }}</td>
-      </tr>
-      {% empty %}
-      <tr>
-        <td colspan="6" style="padding:14px 8px; color:#667085;">
-          No findings detected with the current rule set.
-        </td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
-</div>
+                <td>
+                  <div style="font-weight:700;">Why flagged</div>
+                  <div style="margin-top:4px;"><small>{{ f.reason }}</small></div>
+                </td>
+              </tr>
+              {% empty %}
+              <tr>
+                <td colspan="4" style="padding:14px 8px; color:#667085;">
+                  No findings detected with the current rule set.
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
 
       </div>
     </div>

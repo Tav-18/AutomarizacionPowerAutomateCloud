@@ -1,20 +1,37 @@
 import os
+import re
 import uuid
 from collections import Counter
 
-import pdfkit
 from django.conf import settings
 from django.http import FileResponse, Http404
 from django.shortcuts import render, redirect
-from django.template.loader import render_to_string
 
 from .forms import UploadSolutionZipForm
 from .services.zip_reader import save_upload, extract_zip, find_json_files
 from .services.flow_parser import parse_flow_json
 from .services.rules import run_all_rules, Finding
 from .services.scoring import compute_score
+from .services.excel_export import export_findings_to_xlsx
 
 BASE_DIR = settings.BASE_DIR
+
+
+def _flow_base(flow_name: str) -> str:
+    base = os.path.basename(flow_name or "").strip()
+    base = re.sub(r"\.json$", "", base, flags=re.I)
+    return base.split("-", 1)[0].strip() if "-" in base else base.strip()
+
+
+def _action_pretty(action: str) -> str:
+    s = (action or "").replace("_", " ").strip()
+    s_low = s.lower()
+    for p in ["get data on rpa ", "get data on ", "get data "]:
+        if s_low.startswith(p):
+            s = s[len(p):].strip()
+            break
+    s = re.sub(r"\bcontent\b$", "", s, flags=re.I).strip()
+    return s
 
 
 def upload_view(request):
@@ -22,8 +39,6 @@ def upload_view(request):
         form = UploadSolutionZipForm(request.POST, request.FILES)
         if form.is_valid():
             run_id = str(uuid.uuid4())
-
-            # ✅ Project ID (del form)
             project_id = form.cleaned_data.get("project_id", "").strip()
 
             uploads_dir = BASE_DIR / "uploads" / run_id
@@ -52,6 +67,7 @@ def upload_view(request):
                 flow = parse_flow_json(jf)
                 if not flow:
                     continue
+
                 parsed_flows.append(flow)
                 total_actions += len(flow.actions)
 
@@ -61,40 +77,21 @@ def upload_view(request):
                     )
 
             # 5) Score
-            # compute_score(findings) debe regresar: score, sev3, sev2, sev1, sem
             score, sev3, sev2, sev1, sem = compute_score(findings)
 
-            # 6) Reporte HTML (para PDF)
-            css_path = BASE_DIR / "analyzer" / "static" / "analyzer" / "styles_print.css"
-            inline_css = css_path.read_text(encoding="utf-8") if css_path.exists() else ""
-
+            # 6) Serializar findings para session (máx 500)
             findings_dicts = [item.__dict__ for item in findings[:500]]
 
-            report_html = render_to_string(
-                "analyzer/report.html",
-                {
-                    "inline_css": inline_css,
-                    "run_id": run_id,              # si quieres ocultarlo en pantalla, en PDF puede quedar
-                    "project_id": project_id,      # ✅ nuevo
-                    "score": score,
-                    "sem": sem,
-                    # ✅ mantenemos nombres para templates actuales
-                    "e": sev3,   # severity 3 (crítico)
-                    "w": sev2,   # severity 2
-                    "i": sev1,   # severity 1 (bajo)
-                    "total_json": total_json,
-                    "total_flows": len(parsed_flows),
-                    "total_actions": total_actions,
-                    "findings": findings_dicts,
-                },
-            )
+            # ✅ 6.1) Agregar target_pretty a cada finding
+            for item in findings_dicts:
+                item["target_pretty"] = (
+                    f"{_flow_base(item.get('flow_name', ''))} / "
+                    f"{_action_pretty(item.get('action_name', ''))}"
+                )
 
-            report_html_path = reports_dir / "report.html"
-            report_html_path.write_text(report_html, encoding="utf-8")
-
-            # 7) Guardar en sesión
+            # 7) Guardar resultados en sesión
             request.session[f"run:{run_id}"] = {
-                "project_id": project_id,  # ✅ nuevo
+                "project_id": project_id,
                 "score": score,
                 "sem": sem,
                 "e": sev3,
@@ -124,7 +121,6 @@ def result_view(request, run_id: str):
 
     findings = data.get("findings", [])
 
-    # ✅ Top repeated rules (Broken Rule)
     counts = Counter([(f.get("rule_name") or "Unknown") for f in findings])
     top_rules = counts.most_common(6)
 
@@ -133,14 +129,14 @@ def result_view(request, run_id: str):
         "analyzer/result.html",
         {
             "run_id": run_id,
-            "project_id": data.get("project_id", ""),  # ✅ nuevo
+            "project_id": data.get("project_id", ""),
             "score": data["score"],
             "sem": data["sem"],
             "e": data["e"],
             "w": data["w"],
             "i": data["i"],
             "findings": findings,
-            "top_rules": top_rules,  # ✅ nuevo
+            "top_rules": top_rules,
             "total_json": data.get("total_json", 0),
             "total_flows": data.get("total_flows", 0),
             "total_actions": data.get("total_actions", 0),
@@ -148,34 +144,29 @@ def result_view(request, run_id: str):
     )
 
 
-def download_pdf(request, run_id: str):
-    html_path = BASE_DIR / "reports" / run_id / "report.html"
-    if not html_path.exists():
-        raise Http404("Report HTML not found")
+def download_excel(request, run_id: str):
+    data = request.session.get(f"run:{run_id}")
+    if not data:
+        raise Http404("No results for this run_id")
 
-    pdf_path = BASE_DIR / "reports" / run_id / "report.pdf"
+    reports_dir = BASE_DIR / "reports" / run_id
+    os.makedirs(reports_dir, exist_ok=True)
 
-    wk_path = getattr(settings, "WKHTMLTOPDF_PATH", None)
-    if not wk_path or not os.path.exists(wk_path):
-        raise Http404("wkhtmltopdf not installed or WKHTMLTOPDF_PATH is wrong")
+    xlsx_path = reports_dir / "report.xlsx"
 
-    config = pdfkit.configuration(wkhtmltopdf=wk_path)
+    export_findings_to_xlsx(
+        out_path=str(xlsx_path),
+        findings=data.get("findings", []),
+        project_id=data.get("project_id", ""),
+    )
 
-    options = {
-        "page-size": "A4",
-        "encoding": "UTF-8",
-        "margin-top": "10mm",
-        "margin-right": "10mm",
-        "margin-bottom": "10mm",
-        "margin-left": "10mm",
-        "enable-local-file-access": None,
-        "quiet": "",
-    }
-
-    pdfkit.from_file(str(html_path), str(pdf_path), configuration=config, options=options)
+    # ✅ Nombre del archivo con Project ID + run_id (más profesional)
+    project_id = (data.get("project_id") or "SIN_ID").strip()
+    project_id = project_id.replace(" ", "_").replace("/", "-")
+    safe_project_id = re.sub(r"[^A-Za-z0-9_.-]", "", project_id)
 
     return FileResponse(
-        open(pdf_path, "rb"),
+        open(xlsx_path, "rb"),
         as_attachment=True,
-        filename=f"report_{run_id}.pdf",
-    )
+        filename=f"reporte_{safe_project_id}.xlsx",
+)
