@@ -33,6 +33,13 @@ def _action_pretty(action: str) -> str:
     s = re.sub(r"\bcontent\b$", "", s, flags=re.I).strip()
     return s
 
+def _action_key(flow_name: str, action_name: str, json_path: str) -> str:
+    """
+    Crea una llave única por actividad para no contar doble
+    cuando una misma acción rompe varias reglas.
+    """
+    return f"{flow_name or ''}||{action_name or ''}||{json_path or ''}"
+
 
 def upload_view(request):
     if request.method == "POST":
@@ -76,20 +83,32 @@ def upload_view(request):
                         run_all_rules(flow.flow_name, act.name, act.raw, act.json_path)
                     )
 
-            # 5) Score
+# 5) Score
             score, sev3, sev2, sev1, sem = compute_score(findings)
 
-            # 6) Serializar findings para session (máx 500)
+            # 6) Contar actividades únicas con incidencia
+            flagged_actions = {
+                _action_key(f.flow_name, f.action_name, f.json_path)
+                for f in findings
+            }
+            flagged_actions_count = len(flagged_actions)
+            passed_actions_count = max(0, total_actions - flagged_actions_count)
+
+            passed_actions_pct = 0
+            if total_actions > 0:
+                passed_actions_pct = round((passed_actions_count / total_actions) * 100, 1)
+
+            # 7) Serializar findings para session (máx 500)
             findings_dicts = [item.__dict__ for item in findings[:500]]
 
-            # ✅ 6.1) Agregar target_pretty a cada finding
+            # 7.1) Agregar target_pretty a cada finding
             for item in findings_dicts:
                 item["target_pretty"] = (
                     f"{_flow_base(item.get('flow_name', ''))} / "
                     f"{_action_pretty(item.get('action_name', ''))}"
                 )
 
-            # 7) Guardar resultados en sesión
+            # 8) Guardar resultados en sesión
             request.session[f"run:{run_id}"] = {
                 "project_id": project_id,
                 "score": score,
@@ -101,8 +120,10 @@ def upload_view(request):
                 "total_json": total_json,
                 "total_flows": len(parsed_flows),
                 "total_actions": total_actions,
+                "flagged_actions_count": flagged_actions_count,
+                "passed_actions_count": passed_actions_count,
+                "passed_actions_pct": passed_actions_pct,
             }
-
             return redirect("result", run_id=run_id)
 
     # GET o form inválido
@@ -140,6 +161,9 @@ def result_view(request, run_id: str):
             "total_json": data.get("total_json", 0),
             "total_flows": data.get("total_flows", 0),
             "total_actions": data.get("total_actions", 0),
+            "flagged_actions_count": data.get("flagged_actions_count", 0),
+            "passed_actions_count": data.get("passed_actions_count", 0),
+            "passed_actions_pct": data.get("passed_actions_pct", 0),
         },
     )
 
