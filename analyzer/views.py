@@ -10,7 +10,7 @@ from django.shortcuts import render, redirect
 from .forms import UploadSolutionZipForm
 from .services.zip_reader import save_upload, extract_zip, find_json_files
 from .services.flow_parser import parse_flow_json
-from .services.rules import run_all_rules, run_flow_rules, Finding
+from .services.rules import run_all_rules, Finding
 from .services.scoring import compute_score
 from .services.excel_export import export_findings_to_xlsx
 
@@ -33,12 +33,13 @@ def _action_pretty(action: str) -> str:
     s = re.sub(r"\bcontent\b$", "", s, flags=re.I).strip()
     return s
 
-def _action_key(flow_name: str, action_name: str, json_path: str) -> str:
+def _action_key(flow_name: str, action_name: str) -> str:
     """
-    Crea una llave única por actividad para no contar doble
-    cuando una misma acción rompe varias reglas.
+    Llave única real por actividad.
+    No debe usar json_path del finding porque una misma acción
+    puede tener varios findings en distintos paths internos.
     """
-    return f"{flow_name or ''}||{action_name or ''}||{json_path or ''}"
+    return f"{flow_name or ''}||{action_name or ''}"
 
 
 def upload_view(request):
@@ -78,11 +79,6 @@ def upload_view(request):
                 parsed_flows.append(flow)
                 total_actions += len(flow.actions)
 
-                # Reglas a nivel flujo
-                findings.extend(
-                    run_flow_rules(flow.flow_name, flow.raw, flow.source_file)
-                )
-
                 # Reglas a nivel acción
                 for act in flow.actions:
                     findings.extend(
@@ -94,7 +90,7 @@ def upload_view(request):
 
             # 6) Contar actividades únicas con incidencia
             flagged_actions = {
-                _action_key(f.flow_name, f.action_name, f.json_path)
+                _action_key(f.flow_name, f.action_name)
                 for f in findings
             }
             flagged_actions_count = len(flagged_actions)
