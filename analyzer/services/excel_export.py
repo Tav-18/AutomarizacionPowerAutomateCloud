@@ -76,32 +76,31 @@ def make_target(flow_name: str, action_name: str) -> str:
 #    (MVP Cloud)
 # =========================
 RULE_CATALOG: Dict[str, Dict[str, object]] = {
-    # OJO: estos keys deben coincidir con f["rule_name"] que tú guardas en findings
-    "Hardcode (URL/Email)": {
+    "Hardcode sensible": {
         "impact_area": "C - Hard Code",
         "title": "Hard Code",
         "suggestion_es": (
             "Evitar valores sensibles hardcodeados. "
-            "Mover a un repositorio seguro (por ejemplo variables de entorno / Key Vault / "
-            "conexiones administradas) según el estándar."
+            "Mover a un repositorio seguro (por ejemplo variables de entorno protegidas, "
+            "Key Vault o connection references) según el estándar."
         ),
     },
     "Parametrizable": {
         "impact_area": "M - Parametrizable",
         "title": "Parametrizable",
         "suggestion_es": (
-            "Mover este valor a un mecanismo parametrizable (por ejemplo variables de entorno "
-            "/ configuración central) según el estándar."
+            "Mover este valor a un mecanismo parametrizable (por ejemplo variables de entorno, "
+            "parámetros o configuración central) según el estándar."
         ),
     },
-    "Action naming": {
+    "Naming de actividades": {
         "impact_area": "L - Nombre de Actividades",
         "title": "Nombre de Actividades",
         "suggestion_es": (
             "Renombrar la actividad a un título descriptivo y único, alineado al manual."
         ),
     },
-    "Error handling (RunAfter)": {
+    "Manejo de errores (RunAfter)": {
         "impact_area": "E - Manejo de errores",
         "title": "Manejo de errores",
         "suggestion_es": (
@@ -115,6 +114,38 @@ RULE_CATALOG: Dict[str, Dict[str, object]] = {
         "suggestion_es": (
             "Evitar demoras fijas; preferir condiciones/esperas robustas o parametrizar la demora "
             "con justificación."
+        ),
+    },
+    "Nomenclatura de variables": {
+        "impact_area": "L - Variables",
+        "title": "Variable Naming",
+        "suggestion_es": (
+            "Renombrar la variable siguiendo el estándar Cloud: "
+            "Bln/Int/Flt/Str/Obj/Arr + UpperCamelCase."
+        ),
+    },
+    "Prefijos de parámetros entre flujos": {
+        "impact_area": "L - Parámetros",
+        "title": "Flow Parameters",
+        "suggestion_es": (
+            "Renombrar parámetros usando in_, out_ o io_ y el tipo de dato "
+            "según el estándar definido."
+        ),
+    },
+    "Recomendaciones de escritura": {
+        "impact_area": "L - Escritura",
+        "title": "Writing Rules",
+        "suggestion_es": (
+            "Usar ASCII, sin acentos ni caracteres especiales no permitidos, "
+            "y mantener nombres consistentes."
+        ),
+    },
+    "Nomenclatura de flujos y subflujos": {
+        "impact_area": "L - Flujos",
+        "title": "Flow Naming",
+        "suggestion_es": (
+            "Renombrar el flujo o subflujo usando UpperCamelCase, sin espacios, "
+            "sin acentos y sin caracteres especiales."
         ),
     },
 }

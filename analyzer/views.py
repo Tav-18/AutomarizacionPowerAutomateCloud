@@ -10,7 +10,7 @@ from django.shortcuts import render, redirect
 from .forms import UploadSolutionZipForm
 from .services.zip_reader import save_upload, extract_zip, find_json_files
 from .services.flow_parser import parse_flow_json
-from .services.rules import run_all_rules, Finding
+from .services.rules import run_all_rules, run_flow_rules, Finding
 from .services.scoring import compute_score
 from .services.excel_export import export_findings_to_xlsx
 
@@ -78,6 +78,12 @@ def upload_view(request):
                 parsed_flows.append(flow)
                 total_actions += len(flow.actions)
 
+                # Reglas a nivel flujo
+                findings.extend(
+                    run_flow_rules(flow.flow_name, flow.raw, flow.source_file)
+                )
+
+                # Reglas a nivel acción
                 for act in flow.actions:
                     findings.extend(
                         run_all_rules(flow.flow_name, act.name, act.raw, act.json_path)
@@ -103,9 +109,13 @@ def upload_view(request):
 
             # 7.1) Agregar target_pretty a cada finding
             for item in findings_dicts:
+                flow_part = _flow_base(item.get("flow_name", ""))
+                action_part = _action_pretty(item.get("action_name", ""))
+
                 item["target_pretty"] = (
-                    f"{_flow_base(item.get('flow_name', ''))} / "
-                    f"{_action_pretty(item.get('action_name', ''))}"
+                    f"{flow_part} / {action_part}".strip(" /")
+                    if action_part
+                    else flow_part
                 )
 
             # 8) Guardar resultados en sesión
