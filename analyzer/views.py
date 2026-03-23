@@ -50,8 +50,6 @@ def upload_view(request):
             run_id = str(uuid.uuid4())
             project_id = form.cleaned_data.get("project_id", "").strip()
 
-            # Todo se procesa en una carpeta temporal del sistema
-            # y se borra sola al terminar.
             with tempfile.TemporaryDirectory(prefix="pa_flow_") as temp_dir:
                 zip_path = os.path.join(temp_dir, "solution.zip")
                 extracted_root = os.path.join(temp_dir, "extracted")
@@ -100,8 +98,18 @@ def upload_view(request):
                 if total_actions > 0:
                     passed_actions_pct = round((passed_actions_count / total_actions) * 100, 1)
 
-                # 7) Serializar findings para session (máx 500)
-                findings_dicts = [item.__dict__ for item in findings[:500]]
+                # 7) Ordenar findings por severidad (1 -> 2 -> 3) y luego serializar
+                findings_sorted = sorted(
+                    findings,
+                    key=lambda f: (
+                        -f.severity_level,
+                        f.rule_name.lower(),
+                        f.flow_name.lower(),
+                        f.action_name.lower(),
+                    )
+                )
+
+                findings_dicts = [item.__dict__ for item in findings_sorted[:500]]
 
                 # 7.1) Agregar target_pretty a cada finding
                 for item in findings_dicts:

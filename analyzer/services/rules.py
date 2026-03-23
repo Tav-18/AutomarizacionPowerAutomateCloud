@@ -459,8 +459,7 @@ def check_action_naming_cloud(
 ) -> List[Finding]:
     """
     Regla: Naming de actividades
-    - Nivel 1 si contiene acentos/ñ
-    - Nivel 2 si el nombre es default real
+    - Única severidad: nivel 1
     """
     findings: List[Finding] = []
 
@@ -482,6 +481,34 @@ def check_action_naming_cloud(
                 fix="Renombrar usando ASCII sin acentos ni caracteres especiales."
             ))
         return findings
+
+    if DEFAULT_ACTION_NAME_RE.match(action_name):
+        findings.append(Finding(
+            severity_level=1,
+            rule_name="Naming de actividades",
+            flow_name=flow_name,
+            action_name=action_name,
+            json_path=base_path,
+            reason="Se detectó un nombre por default (Compose, Condition, Apply_to_each, etc.).",
+            evidence=f"Nombre: {action_name}",
+            impact="Dificulta trazabilidad y mantenimiento porque no se entiende el propósito de la acción sin abrirla.",
+            fix="Renombrar la acción con propósito claro, sin numeración innecesaria."
+        ))
+
+    if re.search(r"[áéíóúñÁÉÍÓÚÑ]", action_name):
+        findings.append(Finding(
+            severity_level=1,
+            rule_name="Naming de actividades",
+            flow_name=flow_name,
+            action_name=action_name,
+            json_path=base_path,
+            reason="El nombre contiene acentos o ñ; se recomienda solo ASCII para consistencia.",
+            evidence=f"Nombre: {action_name}",
+            impact="Inconsistencia de estandarización y posibles diferencias entre equipos o entornos.",
+            fix="Renombrar usando ASCII sin acentos ni caracteres especiales."
+        ))
+
+    return findings
 
     if DEFAULT_ACTION_NAME_RE.match(action_name):
         findings.append(Finding(
