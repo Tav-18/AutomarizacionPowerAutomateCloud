@@ -140,6 +140,14 @@ RULE_CATALOG: Dict[str, Dict[str, object]] = {
             "y mantener nombres consistentes."
         ),
     },
+    "Nomenclatura de variables": {
+    "impact_area": "L - Variables",
+    "title": "Variable Naming",
+    "suggestion_es": (
+        "Renombrar la variable siguiendo el estándar Cloud: "
+        "Bln/Int/Flt/Str/Obj/Arr + UpperCamelCase."
+        ),
+    },
     "Nomenclatura de flujos y subflujos": {
         "impact_area": "L - Flujos",
         "title": "Flow Naming",
@@ -149,6 +157,7 @@ RULE_CATALOG: Dict[str, Dict[str, object]] = {
         ),
     },
 }
+
 
 
 def map_rule(rule_name: str) -> Dict[str, str]:

@@ -38,6 +38,7 @@ DELAY_NAME_RE = re.compile(r"\b(delay|wait)\b", re.IGNORECASE)
 
 WINDOWS_PATH_RE = re.compile(r"^[A-Za-z]:\\")
 UNIX_PATH_RE = re.compile(r"^/(?!/).+")
+VARIABLE_NAME_RE = re.compile(r"^(Bln|Int|Flt|Str|Obj|Arr)[A-Z][A-Za-z0-9]*$")
 
 PARAMETRIZABLE_PATH_HINTS = (
     ".uri",
@@ -176,6 +177,61 @@ def _leaf_path_name(path: str) -> str:
     leaf = re.sub(r"\[\d+\]$", "", leaf)
     return leaf.lower().strip()
 
+def _dedupe_pairs(items: List[Tuple[str, str]]) -> List[Tuple[str, str]]:
+    seen = set()
+    out: List[Tuple[str, str]] = []
+
+    for path, value in items:
+        key = (path, value)
+        if key not in seen:
+            seen.add(key)
+            out.append((path, value))
+
+    return out
+
+
+def _extract_initialized_variable_names(
+    action_name: str,
+    action_raw: Dict[str, Any],
+    base_path: str
+) -> List[Tuple[str, str]]:
+    """
+    Intenta extraer nombres de variables en acciones relacionadas con variables.
+    Es defensiva porque en Power Automate algunos inputs vienen como string y no como dict.
+    """
+    found: List[Tuple[str, str]] = []
+
+    raw_inputs = action_raw.get("inputs")
+    if not isinstance(raw_inputs, dict):
+        return found
+
+    inputs = raw_inputs
+    action_type = str(action_raw.get("type", "") or "").lower()
+    action_name_low = (action_name or "").lower()
+
+    # Caso 1: estructura común inputs.variables[].name
+    variables = inputs.get("variables")
+    if isinstance(variables, list):
+        for i, item in enumerate(variables):
+            if isinstance(item, dict):
+                name = str(item.get("name") or "").strip()
+                if name:
+                    found.append((f"{base_path}.inputs.variables[{i}].name", name))
+
+    # Caso 2: fallback heurístico solo para acciones que parezcan de variables
+    looks_like_variable_action = (
+        "variable" in action_type
+        or "initialize_variable" in action_name_low
+        or "set_variable" in action_name_low
+    )
+
+    if looks_like_variable_action:
+        for key in ("name", "variableName", "variable", "nombre"):
+            value = inputs.get(key)
+            if isinstance(value, str) and value.strip():
+                found.append((f"{base_path}.inputs.{key}", value.strip()))
+
+    return _dedupe_pairs(found)
 
 def _parent_path_name(path: str) -> str:
     """
@@ -454,7 +510,36 @@ def check_action_naming_cloud(
         ))
 
     return findings
+def check_variable_naming(
+    flow_name: str,
+    action_name: str,
+    action_raw: Dict[str, Any],
+    base_path: str
+) -> List[Finding]:
+    """
+    Regla: Nomenclatura de variables
+    Formato esperado:
+    Bln / Int / Flt / Str / Obj / Arr + UpperCamelCase
+    Ejemplo válido:
+    StrNombreCliente
+    """
+    findings: List[Finding] = []
 
+    for path, var_name in _extract_initialized_variable_names(action_name, action_raw, base_path):
+        if not VARIABLE_NAME_RE.match(var_name):
+            findings.append(Finding(
+                severity_level=1,
+                rule_name="Nomenclatura de variables",
+                flow_name=flow_name,
+                action_name=action_name,
+                json_path=path,
+                reason="La variable no sigue la convención esperada de tipo + UpperCamelCase.",
+                evidence=f"Variable: {var_name}",
+                impact="Complica lectura del flujo y dificulta inferir rápidamente el tipo o propósito de la variable.",
+                fix="Renombrar la variable usando prefijo de tipo (Bln/Int/Flt/Str/Obj/Arr) y un nombre descriptivo en UpperCamelCase."
+            ))
+
+    return findings
 
 def run_all_rules(
     flow_name: str,
@@ -467,4 +552,5 @@ def run_all_rules(
     findings += check_missing_runafter(flow_name, action_name, action_raw, base_path)
     findings += check_delay_usage(flow_name, action_name, action_raw, base_path)
     findings += check_action_naming_cloud(flow_name, action_name, base_path)
+    findings += check_variable_naming(flow_name, action_name, action_raw, base_path)
     return findings
