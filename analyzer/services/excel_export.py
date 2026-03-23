@@ -241,7 +241,7 @@ def build_findings_rows(findings: List[dict]) -> List[List[str]]:
 # 6) Export
 # =========================
 def export_findings_to_xlsx(
-    out_path: str,
+    out_path,
     findings: List[dict],
     project_id: str = "",
 ) -> None:
