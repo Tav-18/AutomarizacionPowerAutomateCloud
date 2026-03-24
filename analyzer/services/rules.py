@@ -141,7 +141,6 @@ def _walk_values(obj: Any, base_path: str) -> List[Tuple[str, str]]:
             found.extend(_walk_values(v, f"{base_path}[{i}]"))
     elif isinstance(obj, str):
         found.append((base_path, obj))
-
     return found
 
 
