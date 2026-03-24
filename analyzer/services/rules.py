@@ -23,9 +23,15 @@ SENSITIVE_URL_QUERY_RE = re.compile(
 )
 
 DEFAULT_ACTION_NAME_RE = re.compile(
-    r"^(Compose|Compose_\d+|Initialize_variable|Initialize_variable_\d+|"
-    r"Condition|Condition_\d+|Apply_to_each|Apply_to_each_\d+|"
-    r"Scope|Scope_\d+|Switch|Switch_\d+)$",
+    r"^(Compose|Compose_\d+|"
+    r"Initialize_variable|Initialize_variable_\d+|"
+    r"Set_variable|Set_variable_\d+|"
+    r"Condition|Condition_\d+|"
+    r"Apply_to_each|Apply_to_each_\d+|"
+    r"Scope|Scope_\d+|"
+    r"Switch|Switch_\d+|"
+    r"Delay|Delay_\d+|"
+    r"Wait|Wait_\d+)$",
     re.IGNORECASE
 )
 
@@ -40,23 +46,46 @@ WINDOWS_PATH_RE = re.compile(r"^[A-Za-z]:\\")
 UNIX_PATH_RE = re.compile(r"^/(?!/).+")
 VARIABLE_NAME_RE = re.compile(r"^(Bln|Int|Flt|Str|Obj|Arr)[A-Z][A-Za-z0-9]*$")
 
-PARAMETRIZABLE_PATH_HINTS = (
-    ".uri",
-    ".url",
-    ".endpoint",
-    ".path",
-    ".route",
-    ".folder",
-    ".folderpath",
-    ".filepath",
-    ".file",
-    ".filename",
-    ".host",
-    ".hostname",
-    ".baseurl",
-    ".base_url",
-    ".siteaddress",
-    ".server",
+CURP_RE = re.compile(r"^[A-Z]{4}\d{6}[HM][A-Z]{5}[A-Z0-9]\d$", re.IGNORECASE)
+RFC_RE = re.compile(r"^[A-ZÑ&]{3,4}\d{6}[A-Z0-9]{3}$", re.IGNORECASE)
+PHONE_RE = re.compile(r"^\+?\d{10,15}$")
+GUID_RE = re.compile(
+    r"^[{(]?[0-9a-fA-F]{8}[-]?[0-9a-fA-F]{4}[-]?[0-9a-fA-F]{4}[-]?[0-9a-fA-F]{4}[-]?[0-9a-fA-F]{12}[)}]?$"
+)
+
+PII_FIELD_HINTS = {
+    "correo_electronico", "email", "mail", "correo",
+    "curp", "rfc",
+    "numero_de_seguridad_social", "nss", "imss",
+    "telefono", "celular", "phone", "mobile",
+    "fecha_nacimiento", "birthdate", "dateofbirth",
+}
+
+SENSITIVE_FIELD_HINTS = {
+    "password", "passwd", "pwd",
+    "secret", "token",
+    "api_key", "apikey",
+    "clientsecret", "client_secret",
+    "privatekey", "private_key",
+    "authorization",
+    "accesskey", "access_key",
+    "connectionstring", "connection_string",
+    "recipient", "recipients",
+    "to", "cc", "bcc",
+}
+
+PARAMETRIZABLE_HINTS = (
+    "url", "uri", "endpoint",
+    "path", "route",
+    "folder", "directory",
+    "file", "filename",
+    "template",
+    "host", "hostname",
+    "baseurl", "base_url",
+    "siteaddress", "server",
+    "dataset", "table",
+    "source", "drive",
+    "blob", "container",
 )
 
 SYSTEM_VALUE_HINTS = (
@@ -161,11 +190,6 @@ def _is_system_value(text: str) -> bool:
     return any(token in low for token in SYSTEM_VALUE_HINTS)
 
 def _leaf_path_name(path: str) -> str:
-    """
-    Devuelve el nombre final del path.
-    Ejemplo:
-    definition.actions.Send_an_email_(V2).inputs.to -> to
-    """
     if not path:
         return ""
 
@@ -176,6 +200,19 @@ def _leaf_path_name(path: str) -> str:
     leaf = parts[-1]
     leaf = re.sub(r"\[\d+\]$", "", leaf)
     return leaf.lower().strip()
+
+
+def _parent_path_name(path: str) -> str:
+    if not path:
+        return ""
+
+    parts = path.split(".")
+    if len(parts) < 2:
+        return ""
+
+    parent = parts[-2]
+    parent = re.sub(r"\[\d+\]$", "", parent)
+    return parent.lower().strip()
 
 def _dedupe_pairs(items: List[Tuple[str, str]]) -> List[Tuple[str, str]]:
     seen = set()
@@ -255,22 +292,59 @@ def _looks_sensitive_literal(path: str, value: str) -> bool:
     if not value or _is_dynamic_reference(value):
         return False
 
-    # Ignorar valores técnicos del sistema
     if _is_system_value(value):
+        return False
+
+    leaf = _leaf_path_name(path)
+    parent = _parent_path_name(path)
+
+    # Si solo es el nombre de una variable/campo, no es hardcode sensible
+    # Ejemplo: inputs.variables[0].name = "Password"
+    if leaf == "name":
+        return False
+
+    # 1) Correos literales siempre entran como sensibles
+    if EMAIL_RE.search(value):
+        return True
+
+    # 2) Campos técnicos sensibles por nombre
+    if leaf in SENSITIVE_FIELD_HINTS or parent in SENSITIVE_FIELD_HINTS:
+        return True
+
+    # 3) Datos personales / PII por nombre de campo
+    if leaf in PII_FIELD_HINTS or parent in PII_FIELD_HINTS:
+        return True
+
+    # 4) Patrones explícitos de PII
+    if CURP_RE.match(value):
+        return True
+
+    if RFC_RE.match(value):
+        return True
+
+    # teléfono numérico simple
+    if PHONE_RE.match(re.sub(r"[^\d+]", "", value)):
+        return True
+
+    # 5) Indicadores claros de secretos técnicos
+    if _classify_sensitivity(value):
+        return True
+
+    return False
+
+    # IMPORTANTE:
+    # Si solo es el nombre de una variable/campo (por ejemplo "Password"),
+    # no debe marcarse como hardcode sensible.
+    # Ejemplo:
+    # actions.PruebaVariable.inputs.variables[0].name = "Password"
+    if leaf == "name":
         return False
 
     # 1) Todo correo literal sí entra como sensible
     if EMAIL_RE.search(value):
         return True
 
-    # 2) Si el valor trae indicadores claros de secreto, sí entra
-    if _classify_sensitivity(value):
-        return True
-
-    # 3) Revisar SOLO nombres reales del campo, no todo el path completo
-    leaf = _leaf_path_name(path)
-    parent = _parent_path_name(path)
-
+    # 2) Revisar SOLO nombres reales del campo, no todo el path completo
     sensitive_fields = {
         "password", "passwd", "pwd",
         "secret", "token",
@@ -285,7 +359,13 @@ def _looks_sensitive_literal(path: str, value: str) -> bool:
         "to", "cc", "bcc",
     }
 
+    # Si el campo realmente es sensible, entonces sí evaluar el valor
     if leaf in sensitive_fields or parent in sensitive_fields:
+        return True
+
+    # 3) Si el valor trae indicadores claros de secreto, sí entra
+    # pero solo cuando no sea un simple nombre de variable/campo
+    if _classify_sensitivity(value):
         return True
 
     return False
@@ -293,6 +373,8 @@ def _looks_sensitive_literal(path: str, value: str) -> bool:
 
 def _looks_parametrizable_literal(path: str, value: str) -> bool:
     value = (value or "").strip()
+    path_low = (path or "").lower()
+    leaf = _leaf_path_name(path)
 
     if not value:
         return False
@@ -300,41 +382,110 @@ def _looks_parametrizable_literal(path: str, value: str) -> bool:
     if _is_dynamic_reference(value):
         return False
 
+    if _is_system_value(value):
+        return False
+
+    # Correos y sensibles NO entran como parametrizable
     if EMAIL_RE.search(value):
         return False
 
     if _classify_sensitivity(value):
         return False
 
-    if _is_system_value(value):
+    if CURP_RE.match(value) or RFC_RE.match(value):
         return False
 
-    leaf = _leaf_path_name(path)
-
-    parametrizable_fields = {
-        "uri", "url", "endpoint",
-        "path", "route",
-        "folder", "folderpath",
-        "filepath", "file", "filename",
-        "host", "hostname",
-        "baseurl", "base_url",
-        "siteaddress", "server",
-    }
-
-    if leaf not in parametrizable_fields:
+    # Si por nombre parece PII, no es parametrizable
+    if leaf in PII_FIELD_HINTS:
         return False
 
+    field_looks_configurable = any(token in leaf for token in PARAMETRIZABLE_HINTS)
+
+    if not field_looks_configurable:
+        field_looks_configurable = any(f".{token}" in path_low for token in PARAMETRIZABLE_HINTS)
+
+    if not field_looks_configurable:
+        return False
+
+    # URLs
     if URL_RE.search(value):
         return True
 
+    # Rutas Windows / Unix
     if WINDOWS_PATH_RE.search(value) or UNIX_PATH_RE.search(value):
         return True
 
+    # Archivos típicos
+    if re.search(r"\.(xlsx|xls|docx|doc|csv|txt|json|pdf)$", value, re.IGNORECASE):
+        return True
+
+    # SharePoint / blobs / storage
+    low_value = value.lower()
+    if "sharepoint.com" in low_value or "blob.core.windows.net" in low_value:
+        return True
+
+    # IDs configurables típicos de source/drive/dataset/table
+    if any(token in leaf for token in ("source", "drive", "dataset", "table")):
+        return True
+
+    if GUID_RE.match(value):
+        return True
+
+    # Paths o nombres configurables con slash, backslash o extensión
     if ("/" in value or "\\" in value or "." in value) and len(value) > 3:
         return True
 
     return False
 
+    parametrizable_tokens = (
+        "url", "uri", "endpoint",
+        "path", "route",
+        "folder", "directory",
+        "file", "filename",
+        "template",
+        "host", "hostname",
+        "baseurl", "base_url",
+        "siteaddress", "server",
+        "dataset", "table",
+        "source", "drive",
+    )
+
+    # El campo puede llamarse fileRPAEmployeeInformation,
+    # CORPORATIVOFijoTemplate, tableRelacionUsuario, etc.
+    field_looks_configurable = any(token in leaf for token in parametrizable_tokens)
+
+    # También damos chance por si el path completo sugiere config
+    if not field_looks_configurable:
+        field_looks_configurable = any(f".{token}" in path_low for token in parametrizable_tokens)
+
+    if not field_looks_configurable:
+        return False
+
+    # URLs
+    if URL_RE.search(value):
+        return True
+
+    # Rutas
+    if WINDOWS_PATH_RE.search(value) or UNIX_PATH_RE.search(value):
+        return True
+
+    # Archivos típicos
+    if re.search(r"\.(xlsx|xls|docx|doc|csv|txt|json|pdf)$", value, re.IGNORECASE):
+        return True
+
+    # SharePoint / OneDrive / ids de configuración
+    if "sharepoint.com" in value.lower():
+        return True
+
+    # Valores tipo source/drive/table/dataset aunque no traigan slash
+    if any(token in leaf for token in ("source", "drive", "dataset", "table")):
+        return True
+
+    # Paths o nombres configurables con slash, backslash o extensión
+    if ("/" in value or "\\" in value or "." in value) and len(value) > 3:
+        return True
+
+    return False
 
 # =========================
 # Rules (Action level)
@@ -429,28 +580,64 @@ def check_delay_usage(
     """
     Regla: Delay/Wait
     - Nivel 2 si se detecta Delay/Wait con valor literal
+    - Soporta:
+        * type = Wait / Delay
+        * inputs.interval.count + unit
+        * strings tipo PT5M
     """
     findings: List[Finding] = []
-    action_type = str(action_raw.get("type", "") or "")
 
-    if DELAY_NAME_RE.search(action_name) or action_type.lower() == "delay":
-        for path, s in _walk_values(action_raw.get("inputs", {}), f"{base_path}.inputs"):
-            if re.search(r"\b\d+\b", s) or re.search(r"PT\d", s):
-                findings.append(Finding(
-                    severity_level=2,
-                    rule_name="Delay/Wait",
-                    flow_name=flow_name,
-                    action_name=action_name,
-                    json_path=path,
-                    reason="Se detectó Delay o Wait con valor literal; puede degradar rendimiento y volver frágil el flujo.",
-                    evidence=s[:240],
-                    impact="Aumenta tiempos de ejecución y puede fallar si cambian tiempos o latencias del entorno.",
-                    fix="Evitar delays innecesarios; si se requiere, justificar y parametrizar o usar una condición de espera más robusta."
-                ))
-                break
+    action_type = str(action_raw.get("type", "") or "").lower()
+    action_name_low = (action_name or "").lower()
+
+    is_delay_action = (
+        DELAY_NAME_RE.search(action_name_low) is not None
+        or action_type in ("delay", "wait")
+    )
+
+    if not is_delay_action:
+        return findings
+
+    raw_inputs = action_raw.get("inputs")
+    inputs = raw_inputs if isinstance(raw_inputs, dict) else {}
+
+    # Caso 1: estructura típica interval.count / interval.unit
+    interval = inputs.get("interval")
+    if isinstance(interval, dict):
+        count = interval.get("count")
+        unit = interval.get("unit")
+
+        if isinstance(count, (int, float)) or (isinstance(count, str) and count.strip()):
+            findings.append(Finding(
+                severity_level=2,
+                rule_name="Delay/Wait",
+                flow_name=flow_name,
+                action_name=action_name,
+                json_path=f"{base_path}.inputs.interval",
+                reason="Se detectó una acción Delay/Wait con intervalo literal configurado.",
+                evidence=f"count={count}, unit={unit}",
+                impact="Aumenta tiempos de ejecución y puede volver frágil el flujo si cambian tiempos o latencias del entorno.",
+                fix="Evitar delays innecesarios; si se requiere, justificar y parametrizar el intervalo o usar una condición de espera más robusta."
+            ))
+            return findings
+
+    # Caso 2: string tipo PT5M o números literales en strings
+    for path, s in _walk_values(inputs, f"{base_path}.inputs"):
+        if re.search(r"\b\d+\b", s) or re.search(r"PT\d", s, re.IGNORECASE):
+            findings.append(Finding(
+                severity_level=2,
+                rule_name="Delay/Wait",
+                flow_name=flow_name,
+                action_name=action_name,
+                json_path=path,
+                reason="Se detectó Delay/Wait con valor literal; puede degradar rendimiento y volver frágil el flujo.",
+                evidence=s[:240],
+                impact="Aumenta tiempos de ejecución y puede fallar si cambian tiempos o latencias del entorno.",
+                fix="Evitar delays innecesarios; si se requiere, justificar y parametrizar o usar una condición de espera más robusta."
+            ))
+            return findings
 
     return findings
-
 
 def check_action_naming_cloud(
     flow_name: str,

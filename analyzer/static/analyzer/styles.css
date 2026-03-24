@@ -990,4 +990,38 @@ input[type="text"]:focus{
     width: 100%;
   }
 }
+/* =========================
+   JSON selection screen
+   ========================= */
 
+.selection-toolbar{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  gap:1rem;
+  margin-bottom:1rem;
+  flex-wrap:wrap;
+}
+
+.json-picker-table .checkbox-col{
+  width:88px;
+  text-align:center;
+}
+
+.json-checkbox{
+  width:18px;
+  height:18px;
+  accent-color:var(--b-purple);
+  cursor:pointer;
+}
+
+.json-flow-name{
+  font-weight:800;
+  color:var(--text);
+}
+
+.json-rel-path{
+  color:var(--muted);
+  font-size:var(--text-sm);
+  word-break:break-word;
+}

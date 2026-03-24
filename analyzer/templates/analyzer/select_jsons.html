@@ -1,0 +1,104 @@
+{% extends "analyzer/base.html" %}
+{% block title %}Select JSON Files{% endblock %}
+
+{% block content %}
+  <section class="card">
+    <div class="ready-head">
+      <div>
+        <p class="eyebrow">JSON Selection</p>
+        <h1 class="ready-title">Choose the JSON files to analyze</h1>
+        <p class="ready-sub">
+          Project ID: <strong>{{ project_id }}</strong> ·
+          Found JSON files: <strong>{{ json_count }}</strong>
+        </p>
+      </div>
+
+      <div class="ready-badges">
+        <span class="badge-mini">Power Automate Cloud</span>
+        <span class="badge-mini">Manual selection</span>
+      </div>
+    </div>
+
+    <div class="hr"></div>
+
+    {% if error %}
+      <div class="alert alert-error">{{ error }}</div>
+      <div class="hr"></div>
+    {% endif %}
+
+    <form method="post" class="form">
+      {% csrf_token %}
+
+      <div class="selection-toolbar">
+        <div class="action-group">
+          <button type="button" class="btn btn-secondary" id="selectAllBtn">Select all</button>
+          <button type="button" class="btn btn-secondary" id="clearAllBtn">Clear all</button>
+        </div>
+
+        <div class="action-group">
+          <a class="btn btn-secondary" href="{% url 'upload' %}">Back</a>
+          <button type="submit" class="btn btn-primary">Analyze Selected JSONs</button>
+        </div>
+      </div>
+
+      <div class="summary-table-wrap">
+        <table class="summary-table json-picker-table">
+          <thead>
+            <tr>
+              <th class="checkbox-col">Select</th>
+              <th>Flow</th>
+              <th>Relative Path</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for item in json_candidates %}
+              <tr>
+                <td class="checkbox-col">
+                  <input
+                    type="checkbox"
+                    name="selected_jsons"
+                    value="{{ item.id }}"
+                    class="json-checkbox"
+                    checked
+                  >
+                </td>
+                <td>
+                  <div class="json-flow-name">{{ item.display_name }}</div>
+                </td>
+                <td>
+                  <div class="json-rel-path">{{ item.rel_path }}</div>
+                </td>
+              </tr>
+            {% empty %}
+              <tr>
+                <td colspan="3" class="empty-state-cell">
+                  No JSON files were found in the uploaded ZIP.
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </form>
+  </section>
+
+  <script>
+    (function () {
+      const selectAllBtn = document.getElementById("selectAllBtn");
+      const clearAllBtn = document.getElementById("clearAllBtn");
+      const checkboxes = Array.from(document.querySelectorAll(".json-checkbox"));
+
+      if (selectAllBtn) {
+        selectAllBtn.addEventListener("click", function () {
+          checkboxes.forEach(cb => { cb.checked = true; });
+        });
+      }
+
+      if (clearAllBtn) {
+        clearAllBtn.addEventListener("click", function () {
+          checkboxes.forEach(cb => { cb.checked = false; });
+        });
+      }
+    })();
+  </script>
+{% endblock %}
