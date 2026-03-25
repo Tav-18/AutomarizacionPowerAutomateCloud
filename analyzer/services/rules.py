@@ -709,7 +709,7 @@ def check_action_naming_cloud(
             impact="Dificulta trazabilidad y mantenimiento porque no se entiende el propósito de la acción sin abrirla.",
             fix="Renombrar la acción con propósito claro, sin numeración innecesaria."
         ))
-
+    
     if re.search(r"[áéíóúñÁÉÍÓÚÑ]", action_name):
         findings.append(Finding(
             severity_level=1,

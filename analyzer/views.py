@@ -97,7 +97,37 @@ def _build_json_candidates(json_files: list[str], extracted_root: str) -> list[d
 
     return candidates
 
+def _render_upload_with_picker(
+    request,
+    *,
+    form,
+    pick_id: str,
+    project_id: str,
+    candidates: list[dict],
+    selected_ids: list[str] | None = None,
+    picker_error: str | None = None,
+    uploaded_file_name: str = "",
+    uploaded_file_size: int = 0,
+):
+    selected_ids = selected_ids or [item["id"] for item in candidates]
 
+    return render(
+        request,
+        "analyzer/upload.html",
+        {
+            "form": form,
+            "show_json_picker": True,
+            "pick_id": pick_id,
+            "project_id": project_id,
+            "json_candidates": candidates,
+            "json_count": len(candidates),
+            "selected_json_ids": selected_ids,
+            "selected_json_count": len(selected_ids),
+            "picker_error": picker_error,
+            "uploaded_file_name": uploaded_file_name,
+            "uploaded_file_size": uploaded_file_size,
+        },
+    )
 
 def upload_view(request):
     if request.method == "POST":
@@ -116,13 +146,13 @@ def upload_view(request):
             os.makedirs(pick_dir, exist_ok=True)
             os.makedirs(extracted_root, exist_ok=True)
 
-            # 1) Guardar ZIP
-            save_upload(request.FILES["solution_zip"], str(zip_path))
+            uploaded = request.FILES["solution_zip"]
+            uploaded_file_name = uploaded.name
+            uploaded_file_size = uploaded.size
 
-            # 2) Extraer ZIP
+            save_upload(uploaded, str(zip_path))
             extract_zip(str(zip_path), str(extracted_root))
 
-            # 3) Buscar JSON
             json_files = find_json_files(str(extracted_root))
             if not json_files:
                 shutil.rmtree(pick_dir, ignore_errors=True)
@@ -135,7 +165,6 @@ def upload_view(request):
                     },
                 )
 
-            # 4) Preparar lista para pantalla de selección
             candidates = _build_json_candidates(json_files, str(extracted_root))
 
             request.session[f"pick:{pick_id}"] = {
@@ -143,15 +172,145 @@ def upload_view(request):
                 "pick_dir": str(pick_dir),
                 "extracted_root": str(extracted_root),
                 "candidates": candidates,
+                "uploaded_file_name": uploaded_file_name,
+                "uploaded_file_size": uploaded_file_size,
             }
 
-            # 5) Ir a la pantalla para seleccionar JSONs
-            return redirect("select_jsons", pick_id=pick_id)
+            return _render_upload_with_picker(
+                request,
+                form=form,
+                pick_id=pick_id,
+                project_id=project_id,
+                candidates=candidates,
+                selected_ids=[item["id"] for item in candidates],
+                uploaded_file_name=uploaded_file_name,
+                uploaded_file_size=uploaded_file_size,
+            )
 
-    # GET o form inválido
     form = UploadSolutionZipForm()
     return render(request, "analyzer/upload.html", {"form": form})
 
+def select_jsons_view(request, pick_id: str):
+    data = request.session.get(f"pick:{pick_id}")
+    if not data:
+        return redirect("upload")
+
+    candidates = data.get("candidates", [])
+    project_id = (request.POST.get("project_id") or data.get("project_id", "")).strip()
+    data["project_id"] = project_id
+    request.session[f"pick:{pick_id}"] = data
+    uploaded_file_name = data.get("uploaded_file_name", "")
+    uploaded_file_size = data.get("uploaded_file_size", 0)
+
+    if request.method != "POST":
+        return _render_upload_with_picker(
+            request,
+            form=UploadSolutionZipForm(initial={"project_id": project_id}),
+            pick_id=pick_id,
+            project_id=project_id,
+            candidates=candidates,
+            selected_ids=[item["id"] for item in candidates],
+            uploaded_file_name=uploaded_file_name,
+            uploaded_file_size=uploaded_file_size,
+        )
+
+    selected_ids = request.POST.getlist("selected_jsons")
+
+    if not selected_ids:
+        return _render_upload_with_picker(
+            request,
+            form=UploadSolutionZipForm(initial={"project_id": project_id}),
+            pick_id=pick_id,
+            project_id=project_id,
+            candidates=candidates,
+            selected_ids=[],
+            picker_error="Select at least one flow to continue.",
+            uploaded_file_name=uploaded_file_name,
+            uploaded_file_size=uploaded_file_size,
+        )
+
+    candidate_map = {item["id"]: item for item in candidates}
+    selected_items = [candidate_map[item_id] for item_id in selected_ids if item_id in candidate_map]
+
+    if not selected_items:
+        return _render_upload_with_picker(
+            request,
+            form=UploadSolutionZipForm(initial={"project_id": project_id}),
+            pick_id=pick_id,
+            project_id=project_id,
+            candidates=candidates,
+            selected_ids=[],
+            picker_error="The selected flows are no longer valid. Please upload the ZIP again.",
+            uploaded_file_name=uploaded_file_name,
+            uploaded_file_size=uploaded_file_size,
+        )
+
+    run_id = str(uuid.uuid4())
+    findings: list[Finding] = []
+    parsed_flows = []
+    total_actions = 0
+    total_json = len(selected_items)
+
+    for item in selected_items:
+        jf = item["full_path"]
+
+        flow = parse_flow_json(jf)
+        if not flow:
+            continue
+
+        parsed_flows.append(flow)
+        total_actions += len(flow.actions)
+
+        for act in flow.actions:
+            findings.extend(
+                run_all_rules(flow.flow_name, act.name, act.raw, act.json_path)
+            )
+
+    flagged_actions = {
+        _action_key(f.flow_name, f.action_name)
+        for f in findings
+    }
+    flagged_actions_count = len(flagged_actions)
+    passed_actions_count = max(0, total_actions - flagged_actions_count)
+
+    passed_actions_pct = 0
+    if total_actions > 0:
+        passed_actions_pct = round((passed_actions_count / total_actions) * 100, 1)
+
+    findings_sorted = sorted(
+        findings,
+        key=lambda f: (
+            -f.severity_level,
+            f.rule_name.lower(),
+            f.flow_name.lower(),
+            f.action_name.lower(),
+        )
+    )
+
+    findings_dicts = [item.__dict__ for item in findings_sorted[:500]]
+
+    for item in findings_dicts:
+        flow_part = _flow_base(item.get("flow_name", ""))
+        action_part = _action_pretty(item.get("action_name", ""))
+
+        item["target_pretty"] = (
+            f"{flow_part} / {action_part}".strip(" /")
+            if action_part
+            else flow_part
+        )
+
+    request.session[f"run:{run_id}"] = {
+        "project_id": project_id,
+        "findings": findings_dicts,
+        "total_json": total_json,
+        "total_flows": len(parsed_flows),
+        "total_actions": total_actions,
+        "flagged_actions_count": flagged_actions_count,
+        "passed_actions_count": passed_actions_count,
+        "passed_actions_pct": passed_actions_pct,
+    }
+
+    return redirect("result", run_id=run_id)
 
 def select_jsons_view(request, pick_id: str):
     data = request.session.get(f"pick:{pick_id}")

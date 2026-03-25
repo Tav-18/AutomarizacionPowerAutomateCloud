@@ -85,5 +85,3 @@ def parse_flow_json(file_path: str) -> Optional[ParsedFlow]:
         raw=workflow_raw,
     )
 
-    flow_name = _guess_flow_name(raw, fallback=file_path.split("\\")[-1])
-    return ParsedFlow(flow_name=flow_name, source_file=file_path, actions=actions, raw=raw)

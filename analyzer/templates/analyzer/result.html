@@ -1,17 +1,23 @@
 {% extends "analyzer/base.html" %}
-{% block title %}Results{% endblock %}
+{% load static %}
+{% block title %}Analysis Results{% endblock %}
 
 {% block content %}
-  <section class="card">
-    <div class="ready-head">
-      <div>
-        <p class="eyebrow">Analysis Result</p>
-        <h1 class="ready-title">Analyzed ZIP Summary</h1>
-        <p class="ready-sub">Executive view of the score, metrics, and detected rules.</p>
+  <section class="card result-card">
+    <div class="ready-head ready-head--result">
+      <div class="ready-copy">
+        <h1 class="ready-title">Analysis Summary</h1>
+        <p class="ready-sub">Overview of the key metrics and detected findings.</p>
       </div>
 
-      <div class="ready-badges">
-        <span class="badge-mini">Power Automate Cloud</span>
+      <div class="ready-actions">
+        <div class="ready-badges">
+          {% if sem|lower == "aprobable" %}
+            <span class="badge-mini status-badge status-badge--success">Status: {{ sem }}</span>
+          {% else %}
+            <span class="badge-mini status-badge status-badge--danger">Status: {{ sem }}</span>
+          {% endif %}
+        </div>
       </div>
     </div>
 
@@ -24,14 +30,14 @@
         <a class="btn btn-secondary" href="{% url 'upload' %}">Back</a>
       </div>
     {% else %}
-      <div class="metrics-grid">
+      <div class="metrics-grid metrics-grid--balanced">
         <article class="metric-card">
-          <span class="metric-label">Project ID</span>
-          <strong class="metric-value metric-value--small">{{ project_id }}</strong>
+          <span class="metric-label">PROJECT ID</span>
+          <strong class="metric-value">{{ project_id }}</strong>
         </article>
 
         <article class="metric-card">
-          <span class="metric-label">Flows</span>
+          <span class="metric-label">FLOWS</span>
           <strong class="metric-value">{{ total_flows }}</strong>
         </article>
 
@@ -41,42 +47,67 @@
         </article>
 
         <article class="metric-card">
-          <span class="metric-label">Actions with Findings</span>
+          <span class="metric-label">ISSUES DETECTED</span>
           <strong class="metric-value">{{ flagged_actions_count }}</strong>
         </article>
 
         <article class="metric-card">
-          <span class="metric-label">Actions OK</span>
+          <span class="metric-label">Compliant Actions</span>
           <strong class="metric-value">{{ passed_actions_count }}</strong>
         </article>
 
         <article class="metric-card">
-          <span class="metric-label">Compliance</span>
+          <span class="metric-label">Compliance Rate</span>
           <strong class="metric-value">{{ passed_actions_pct }}%</strong>
         </article>
       </div>
 
       <div class="section-block">
-        <div class="section-head">
-          <div>
-            <h2 class="section-title">Most Frequent Findings</h2>
-            <p class="section-subtitle">Rules with the highest recurrence in the current analysis.</p>
+        <div class="section-head section-head--spaced">
+          <div class="section-head__content">
+            <h2 class="section-title">Top Findings by Rule</h2>
+            <p class="section-subtitle">Rules with the highest number of findings in this analysis.</p>
           </div>
+
+          <button
+            type="button"
+            class="btn btn-secondary btn-info-trigger btn-info-trigger--text"
+            data-modal-open="rulesInfoModal"
+            aria-haspopup="dialog"
+            aria-controls="rulesInfoModal"
+            aria-label="More info about reviewed rules"
+            title="More info"
+          >
+            <span class="btn-info-trigger__icon" aria-hidden="true">i</span>
+            <span>More info</span>
+          </button>
         </div>
 
         <div class="summary-table-wrap">
           <table class="summary-table">
             <thead>
               <tr>
-                <th>Detected Rule</th>
-                <th>Count</th>
+                <th>Rule</th>
+                <th>Findings</th>
               </tr>
             </thead>
             <tbody>
               {% for rule, cnt in top_rules %}
                 <tr>
                   <td>{{ rule }}</td>
-                  <td><span class="badge-mini">{{ cnt }}</span></td>
+                  <td>
+  {% if rule == "Hardcode sensible" %}
+    <span class="badge-mini badge-count badge-count--3">{{ cnt }}</span>
+  {% elif rule == "Manejo de errores (RunAfter)" or rule == "RunAfter Error Handling" %}
+    <span class="badge-mini badge-count badge-count--2">{{ cnt }}</span>
+  {% elif rule == "Delay/Wait" %}
+    <span class="badge-mini badge-count badge-count--2">{{ cnt }}</span>
+  {% elif rule == "Naming de actividades" or rule == "Activity Naming" %}
+    <span class="badge-mini badge-count badge-count--1">{{ cnt }}</span>
+  {% else %}
+    <span class="badge-mini badge-count">{{ cnt }}</span>
+  {% endif %}
+</td>
                 </tr>
               {% empty %}
                 <tr>
@@ -88,15 +119,103 @@
         </div>
       </div>
 
-      <div class="submit-bar submit-bar--stack-mobile">
-        <p class="submit-note">You can download the Excel details or start a new analysis.</p>
-        <div class="action-group">
-          <a class="btn btn-secondary" href="{% url 'download_excel' run_id %}">Download Excel</a>
-          <a class="btn btn-primary" href="{% url 'upload' %}">Analyze Another ZIP</a>
+      <div class="result-actions-bar">
+        <div class="result-actions-bar__copy">
+          <p class="submit-note">Download the Excel report or start a new analysis.</p>
+        </div>
+
+        <div class="result-actions-bar__buttons">
+          <a class="btn btn-primary" href="{% url 'download_excel' run_id %}">Download Findings Report</a>
+          <a class="btn btn-secondary" href="{% url 'upload' %}">Back to Home</a>
         </div>
       </div>
     {% endif %}
   </section>
+
+  {% if not error %}
+    <div
+      class="info-modal"
+      id="rulesInfoModal"
+      hidden
+      aria-hidden="true"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="rulesInfoTitle"
+    >
+      <div class="info-modal__backdrop" data-modal-close></div>
+
+      <div class="info-modal__dialog">
+        <div class="info-modal__header">
+          <div>
+            <p class="eyebrow">Rules Overview</p>
+            <h2 class="section-title" id="rulesInfoTitle">Reviewed Rules</h2>
+            <p class="section-subtitle">These are the rule checks currently applied to each flow action.</p>
+          </div>
+
+          <button
+            type="button"
+            class="info-modal__close"
+            aria-label="Close rules information"
+            data-modal-close
+          >
+            ×
+          </button>
+        </div>
+
+        <div class="info-modal__grid">
+          <article class="rule-info-card">
+            <div class="rule-info-card__head">
+              <h3 class="rule-info-card__title">Hardcode sensible</h3>
+              <span class="badge-mini badge-level badge-level--3">Level 3</span>
+            </div>
+            <p class="rule-info-card__text">
+              Detects hardcoded URLs and email addresses inside action inputs. Sensitive values such as tokens,
+              keys or secrets raise the severity level.
+            </p>
+          </article>
+
+          <article class="rule-info-card">
+            <div class="rule-info-card__head">
+              <h3 class="rule-info-card__title">RunAfter Error Handling</h3>
+              <span class="badge-mini badge-level badge-level--2">Level 2</span>
+            </div>
+            <p class="rule-info-card__text">
+              Flags actions that do not define RunAfter, which may leave failed, timed out or canceled paths
+              without controlled error handling.
+            </p>
+          </article>
+
+          <article class="rule-info-card">
+            <div class="rule-info-card__head">
+              <h3 class="rule-info-card__title">Delay/Wait</h3>
+              <span class="badge-mini badge-level badge-level--2">Level 2</span>
+            </div>
+            <p class="rule-info-card__text">
+              Detects Delay or Wait actions with literal values, since they can increase execution time and make
+              the flow more fragile.
+            </p>
+          </article>
+
+          <article class="rule-info-card">
+            <div class="rule-info-card__head">
+              <h3 class="rule-info-card__title">Activity Naming</h3>
+              <span class="badge-mini badge-level badge-level--1">Level 1</span>
+            </div>
+            <p class="rule-info-card__text">
+              Detects default action names and names with accents or special characters to improve readability,
+              consistency and maintainability.
+            </p>
+          </article>
+        </div>
+
+        <div class="info-modal__footer">
+          <button type="button" class="btn btn-primary" data-modal-close>Understood</button>
+        </div>
+      </div>
+    </div>
+
+    <script src="{% static 'analyzer/upload_analyzer.js' %}"></script>
+  {% endif %}
 {% endblock %}
 
 {% block fullbleed %}
@@ -106,8 +225,8 @@
         <div class="card card-tight">
           <div class="section-head section-head--spaced">
             <div>
-              <h2 class="section-title">Findings Detail (maximum 500)</h2>
-              <p class="section-subtitle">Severity, rule, target, and reason for each detected finding.</p>
+              <h2 class="section-title">Finding Details</h2>
+              <p class="section-subtitle">Severity, rule, target and reason for each detected finding.</p>
             </div>
           </div>
 
@@ -117,7 +236,7 @@
                 <tr>
                   <th>Severity</th>
                   <th>Rule</th>
-                  <th>Target (flow / activity)</th>
+                  <th>Target (Flow / Activity)</th>
                   <th>Error Detail</th>
                 </tr>
               </thead>
@@ -125,7 +244,9 @@
                 {% for f in findings %}
                   <tr>
                     <td>
-                      <span class="severity-pill">Level {{ f.severity_level }}</span>
+                      <span class="severity-pill severity-pill--{{ f.severity_level }}">
+                        Level {{ f.severity_level }}
+                      </span>
                     </td>
                     <td>
                       <div class="finding-rule">{{ f.rule_name }}</div>
