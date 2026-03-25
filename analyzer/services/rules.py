@@ -110,16 +110,11 @@ DYNAMIC_REF_RE = re.compile(
 
 @dataclass
 class Finding:
-    # Se muestra en UI
-    severity_level: int   # 1=bajo, 2=medio, 3=crítico
-    rule_name: str        # Nombre legible
-
-    # Identificación
+    severity_level: int
+    rule_name: str
     flow_name: str
     action_name: str
     json_path: str
-
-    # Explicación
     reason: str
     evidence: str
     impact: str
@@ -145,11 +140,43 @@ def _walk_values(obj: Any, base_path: str) -> List[Tuple[str, str]]:
     return found
 
 
+def _dedupe_pairs(items: List[Tuple[str, str]]) -> List[Tuple[str, str]]:
+    seen = set()
+    out: List[Tuple[str, str]] = []
+
+    for path, value in items:
+        key = (path, value)
+        if key not in seen:
+            seen.add(key)
+            out.append((path, value))
+
+    return out
+
+
+def _leaf_path_name(path: str) -> str:
+    if not path:
+        return ""
+    parts = path.split(".")
+    leaf = parts[-1] if parts else ""
+    leaf = re.sub(r"\[\d+\]$", "", leaf)
+    return leaf.lower().strip()
+
+
+def _parent_path_name(path: str) -> str:
+    if not path:
+        return ""
+    parts = path.split(".")
+    if len(parts) < 2:
+        return ""
+    parent = parts[-2]
+    parent = re.sub(r"\[\d+\]$", "", parent)
+    return parent.lower().strip()
+
+
 def _classify_sensitivity(text: str) -> bool:
     if not text:
         return False
 
-    # Los correos ahora también se consideran sensibles
     if EMAIL_RE.search(text):
         return True
 
@@ -185,46 +212,8 @@ def _is_dynamic_reference(text: str) -> bool:
 def _is_system_value(text: str) -> bool:
     if not text:
         return False
-
     low = text.lower()
     return any(token in low for token in SYSTEM_VALUE_HINTS)
-
-def _leaf_path_name(path: str) -> str:
-    if not path:
-        return ""
-
-    parts = path.split(".")
-    if not parts:
-        return ""
-
-    leaf = parts[-1]
-    leaf = re.sub(r"\[\d+\]$", "", leaf)
-    return leaf.lower().strip()
-
-
-def _parent_path_name(path: str) -> str:
-    if not path:
-        return ""
-
-    parts = path.split(".")
-    if len(parts) < 2:
-        return ""
-
-    parent = parts[-2]
-    parent = re.sub(r"\[\d+\]$", "", parent)
-    return parent.lower().strip()
-
-def _dedupe_pairs(items: List[Tuple[str, str]]) -> List[Tuple[str, str]]:
-    seen = set()
-    out: List[Tuple[str, str]] = []
-
-    for path, value in items:
-        key = (path, value)
-        if key not in seen:
-            seen.add(key)
-            out.append((path, value))
-
-    return out
 
 
 def _extract_initialized_variable_names(
@@ -232,10 +221,6 @@ def _extract_initialized_variable_names(
     action_raw: Dict[str, Any],
     base_path: str
 ) -> List[Tuple[str, str]]:
-    """
-    Intenta extraer nombres de variables en acciones relacionadas con variables.
-    Es defensiva porque en Power Automate algunos inputs vienen como string y no como dict.
-    """
     found: List[Tuple[str, str]] = []
 
     raw_inputs = action_raw.get("inputs")
@@ -246,7 +231,6 @@ def _extract_initialized_variable_names(
     action_type = str(action_raw.get("type", "") or "").lower()
     action_name_low = (action_name or "").lower()
 
-    # Caso 1: estructura común inputs.variables[].name
     variables = inputs.get("variables")
     if isinstance(variables, list):
         for i, item in enumerate(variables):
@@ -255,7 +239,6 @@ def _extract_initialized_variable_names(
                 if name:
                     found.append((f"{base_path}.inputs.variables[{i}].name", name))
 
-    # Caso 2: fallback heurístico solo para acciones que parezcan de variables
     looks_like_variable_action = (
         "variable" in action_type
         or "initialize_variable" in action_name_low
@@ -270,101 +253,36 @@ def _extract_initialized_variable_names(
 
     return _dedupe_pairs(found)
 
-def _parent_path_name(path: str) -> str:
-    """
-    Devuelve el penúltimo nombre del path, si existe.
-    """
-    if not path:
-        return ""
-
-    parts = path.split(".")
-    if len(parts) < 2:
-        return ""
-
-    parent = parts[-2]
-    parent = re.sub(r"\[\d+\]$", "", parent)
-    return parent.lower().strip()
-
 
 def _looks_sensitive_literal(path: str, value: str) -> bool:
     value = (value or "").strip()
-
-    if not value or _is_dynamic_reference(value):
-        return False
-
-    if _is_system_value(value):
+    if not value or _is_dynamic_reference(value) or _is_system_value(value):
         return False
 
     leaf = _leaf_path_name(path)
     parent = _parent_path_name(path)
 
-    # Si solo es el nombre de una variable/campo, no es hardcode sensible
-    # Ejemplo: inputs.variables[0].name = "Password"
     if leaf == "name":
         return False
 
-    # 1) Correos literales siempre entran como sensibles
     if EMAIL_RE.search(value):
         return True
 
-    # 2) Campos técnicos sensibles por nombre
     if leaf in SENSITIVE_FIELD_HINTS or parent in SENSITIVE_FIELD_HINTS:
         return True
 
-    # 3) Datos personales / PII por nombre de campo
     if leaf in PII_FIELD_HINTS or parent in PII_FIELD_HINTS:
         return True
 
-    # 4) Patrones explícitos de PII
     if CURP_RE.match(value):
         return True
 
     if RFC_RE.match(value):
         return True
 
-    # teléfono numérico simple
     if PHONE_RE.match(re.sub(r"[^\d+]", "", value)):
         return True
 
-    # 5) Indicadores claros de secretos técnicos
-    if _classify_sensitivity(value):
-        return True
-
-    return False
-
-    # IMPORTANTE:
-    # Si solo es el nombre de una variable/campo (por ejemplo "Password"),
-    # no debe marcarse como hardcode sensible.
-    # Ejemplo:
-    # actions.PruebaVariable.inputs.variables[0].name = "Password"
-    if leaf == "name":
-        return False
-
-    # 1) Todo correo literal sí entra como sensible
-    if EMAIL_RE.search(value):
-        return True
-
-    # 2) Revisar SOLO nombres reales del campo, no todo el path completo
-    sensitive_fields = {
-        "password", "passwd", "pwd",
-        "secret", "token",
-        "api_key", "apikey",
-        "clientsecret", "client_secret",
-        "privatekey", "private_key",
-        "authorization",
-        "accesskey", "access_key",
-        "connectionstring", "connection_string",
-        "correo", "email", "mail",
-        "recipient", "recipients",
-        "to", "cc", "bcc",
-    }
-
-    # Si el campo realmente es sensible, entonces sí evaluar el valor
-    if leaf in sensitive_fields or parent in sensitive_fields:
-        return True
-
-    # 3) Si el valor trae indicadores claros de secreto, sí entra
-    # pero solo cuando no sea un simple nombre de variable/campo
     if _classify_sensitivity(value):
         return True
 
@@ -379,13 +297,9 @@ def _looks_parametrizable_literal(path: str, value: str) -> bool:
     if not value:
         return False
 
-    if _is_dynamic_reference(value):
+    if _is_dynamic_reference(value) or _is_system_value(value):
         return False
 
-    if _is_system_value(value):
-        return False
-
-    # Correos y sensibles NO entran como parametrizable
     if EMAIL_RE.search(value):
         return False
 
@@ -395,97 +309,40 @@ def _looks_parametrizable_literal(path: str, value: str) -> bool:
     if CURP_RE.match(value) or RFC_RE.match(value):
         return False
 
-    # Si por nombre parece PII, no es parametrizable
     if leaf in PII_FIELD_HINTS:
         return False
 
     field_looks_configurable = any(token in leaf for token in PARAMETRIZABLE_HINTS)
-
     if not field_looks_configurable:
         field_looks_configurable = any(f".{token}" in path_low for token in PARAMETRIZABLE_HINTS)
 
     if not field_looks_configurable:
         return False
 
-    # URLs
     if URL_RE.search(value):
         return True
 
-    # Rutas Windows / Unix
     if WINDOWS_PATH_RE.search(value) or UNIX_PATH_RE.search(value):
         return True
 
-    # Archivos típicos
     if re.search(r"\.(xlsx|xls|docx|doc|csv|txt|json|pdf)$", value, re.IGNORECASE):
         return True
 
-    # SharePoint / blobs / storage
     low_value = value.lower()
     if "sharepoint.com" in low_value or "blob.core.windows.net" in low_value:
         return True
 
-    # IDs configurables típicos de source/drive/dataset/table
     if any(token in leaf for token in ("source", "drive", "dataset", "table")):
         return True
 
     if GUID_RE.match(value):
         return True
 
-    # Paths o nombres configurables con slash, backslash o extensión
     if ("/" in value or "\\" in value or "." in value) and len(value) > 3:
         return True
 
     return False
 
-    parametrizable_tokens = (
-        "url", "uri", "endpoint",
-        "path", "route",
-        "folder", "directory",
-        "file", "filename",
-        "template",
-        "host", "hostname",
-        "baseurl", "base_url",
-        "siteaddress", "server",
-        "dataset", "table",
-        "source", "drive",
-    )
-
-    # El campo puede llamarse fileRPAEmployeeInformation,
-    # CORPORATIVOFijoTemplate, tableRelacionUsuario, etc.
-    field_looks_configurable = any(token in leaf for token in parametrizable_tokens)
-
-    # También damos chance por si el path completo sugiere config
-    if not field_looks_configurable:
-        field_looks_configurable = any(f".{token}" in path_low for token in parametrizable_tokens)
-
-    if not field_looks_configurable:
-        return False
-
-    # URLs
-    if URL_RE.search(value):
-        return True
-
-    # Rutas
-    if WINDOWS_PATH_RE.search(value) or UNIX_PATH_RE.search(value):
-        return True
-
-    # Archivos típicos
-    if re.search(r"\.(xlsx|xls|docx|doc|csv|txt|json|pdf)$", value, re.IGNORECASE):
-        return True
-
-    # SharePoint / OneDrive / ids de configuración
-    if "sharepoint.com" in value.lower():
-        return True
-
-    # Valores tipo source/drive/table/dataset aunque no traigan slash
-    if any(token in leaf for token in ("source", "drive", "dataset", "table")):
-        return True
-
-    # Paths o nombres configurables con slash, backslash o extensión
-    if ("/" in value or "\\" in value or "." in value) and len(value) > 3:
-        return True
-
-    return False
 
 # =========================
 # Rules (Action level)
@@ -497,19 +354,10 @@ def check_hardcode_and_parametrizable(
     action_raw: Dict[str, Any],
     base_path: str
 ) -> List[Finding]:
-    """
-    Separación:
-    - Hardcode sensible -> nivel 3
-    - Parametrizable -> nivel 2 para URLs/rutas/endpoints no sensibles
-    """
     findings: List[Finding] = []
 
     raw_inputs = action_raw.get("inputs")
-
-    if isinstance(raw_inputs, (dict, list, str)):
-        walk_source = raw_inputs
-    else:
-        walk_source = {}
+    walk_source = raw_inputs if isinstance(raw_inputs, (dict, list, str)) else {}
 
     for path, s in _walk_values(walk_source, f"{base_path}.inputs"):
         value = (s or "").strip()
@@ -519,7 +367,7 @@ def check_hardcode_and_parametrizable(
         if _looks_sensitive_literal(path, value):
             findings.append(Finding(
                 severity_level=3,
-                rule_name="Hardcode sensible",
+                rule_name="Hardcode",
                 flow_name=flow_name,
                 action_name=action_name,
                 json_path=path,
@@ -537,7 +385,7 @@ def check_hardcode_and_parametrizable(
                 flow_name=flow_name,
                 action_name=action_name,
                 json_path=path,
-                reason="Se detectó un valor fijo no sensible (URL/ruta/endpoint/host) que debería parametrizarse.",
+                reason="Se detectó un valor fijo no sensible que debería parametrizarse.",
                 evidence=value[:240],
                 impact="Complica promoción entre ambientes, mantenimiento y cambios futuros.",
                 fix="Mover este valor a un mecanismo parametrizable (variables de entorno, parámetros, connection references o configuración central)."
@@ -552,10 +400,6 @@ def check_missing_runafter(
     action_raw: Dict[str, Any],
     base_path: str
 ) -> List[Finding]:
-    """
-    Regla: Manejo de errores (RunAfter)
-    - Nivel 2 si no existe runAfter
-    """
     if action_raw.get("runAfter") is None:
         return [Finding(
             severity_level=2,
@@ -577,14 +421,6 @@ def check_delay_usage(
     action_raw: Dict[str, Any],
     base_path: str
 ) -> List[Finding]:
-    """
-    Regla: Delay/Wait
-    - Nivel 2 si se detecta Delay/Wait con valor literal
-    - Soporta:
-        * type = Wait / Delay
-        * inputs.interval.count + unit
-        * strings tipo PT5M
-    """
     findings: List[Finding] = []
 
     action_type = str(action_raw.get("type", "") or "").lower()
@@ -601,7 +437,6 @@ def check_delay_usage(
     raw_inputs = action_raw.get("inputs")
     inputs = raw_inputs if isinstance(raw_inputs, dict) else {}
 
-    # Caso 1: estructura típica interval.count / interval.unit
     interval = inputs.get("interval")
     if isinstance(interval, dict):
         count = interval.get("count")
@@ -610,7 +445,7 @@ def check_delay_usage(
         if isinstance(count, (int, float)) or (isinstance(count, str) and count.strip()):
             findings.append(Finding(
                 severity_level=2,
-                rule_name="Delay/Wait",
+                rule_name="Retrasos",
                 flow_name=flow_name,
                 action_name=action_name,
                 json_path=f"{base_path}.inputs.interval",
@@ -621,12 +456,11 @@ def check_delay_usage(
             ))
             return findings
 
-    # Caso 2: string tipo PT5M o números literales en strings
     for path, s in _walk_values(inputs, f"{base_path}.inputs"):
         if re.search(r"\b\d+\b", s) or re.search(r"PT\d", s, re.IGNORECASE):
             findings.append(Finding(
                 severity_level=2,
-                rule_name="Delay/Wait",
+                rule_name="Retrasos",
                 flow_name=flow_name,
                 action_name=action_name,
                 json_path=path,
@@ -639,26 +473,22 @@ def check_delay_usage(
 
     return findings
 
+
 def check_action_naming_cloud(
     flow_name: str,
     action_name: str,
     base_path: str
 ) -> List[Finding]:
-    """
-    Regla: Naming de actividades
-    - Única severidad: nivel 1
-    """
     findings: List[Finding] = []
 
     if NAMING_ALLOWLIST_RE.match(action_name):
         return findings
 
-    # Si tiene "_-_" o "-" lo consideramos "personalizado"
     if "_-_" in action_name or "-" in action_name:
         if re.search(r"[áéíóúñÁÉÍÓÚÑ]", action_name):
             findings.append(Finding(
                 severity_level=1,
-                rule_name="Naming de actividades",
+                rule_name="Nomenclatura de actividades",
                 flow_name=flow_name,
                 action_name=action_name,
                 json_path=base_path,
@@ -672,7 +502,7 @@ def check_action_naming_cloud(
     if DEFAULT_ACTION_NAME_RE.match(action_name):
         findings.append(Finding(
             severity_level=1,
-            rule_name="Naming de actividades",
+            rule_name="Nomenclatura de actividades",
             flow_name=flow_name,
             action_name=action_name,
             json_path=base_path,
@@ -685,7 +515,7 @@ def check_action_naming_cloud(
     if re.search(r"[áéíóúñÁÉÍÓÚÑ]", action_name):
         findings.append(Finding(
             severity_level=1,
-            rule_name="Naming de actividades",
+            rule_name="Nomenclatura de actividades",
             flow_name=flow_name,
             action_name=action_name,
             json_path=base_path,
@@ -697,46 +527,13 @@ def check_action_naming_cloud(
 
     return findings
 
-    if DEFAULT_ACTION_NAME_RE.match(action_name):
-        findings.append(Finding(
-            severity_level=2,
-            rule_name="Naming de actividades",
-            flow_name=flow_name,
-            action_name=action_name,
-            json_path=base_path,
-            reason="Se detectó un nombre por default (Compose, Condition, Apply_to_each, etc.).",
-            evidence=f"Nombre: {action_name}",
-            impact="Dificulta trazabilidad y mantenimiento porque no se entiende el propósito de la acción sin abrirla.",
-            fix="Renombrar la acción con propósito claro, sin numeración innecesaria."
-        ))
-    
-    if re.search(r"[áéíóúñÁÉÍÓÚÑ]", action_name):
-        findings.append(Finding(
-            severity_level=1,
-            rule_name="Naming de actividades",
-            flow_name=flow_name,
-            action_name=action_name,
-            json_path=base_path,
-            reason="El nombre contiene acentos o ñ; se recomienda solo ASCII para consistencia.",
-            evidence=f"Nombre: {action_name}",
-            impact="Inconsistencia de estandarización y posibles diferencias entre equipos o entornos.",
-            fix="Renombrar usando ASCII sin acentos ni caracteres especiales."
-        ))
 
-    return findings
 def check_variable_naming(
     flow_name: str,
     action_name: str,
     action_raw: Dict[str, Any],
     base_path: str
 ) -> List[Finding]:
-    """
-    Regla: Nomenclatura de variables
-    Formato esperado:
-    Bln / Int / Flt / Str / Obj / Arr + UpperCamelCase
-    Ejemplo válido:
-    StrNombreCliente
-    """
     findings: List[Finding] = []
 
     for path, var_name in _extract_initialized_variable_names(action_name, action_raw, base_path):
@@ -754,6 +551,7 @@ def check_variable_naming(
             ))
 
     return findings
+
 
 def run_all_rules(
     flow_name: str,
