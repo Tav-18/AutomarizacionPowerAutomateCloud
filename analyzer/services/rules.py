@@ -53,6 +53,14 @@ GUID_RE = re.compile(
     r"^[{(]?[0-9a-fA-F]{8}[-]?[0-9a-fA-F]{4}[-]?[0-9a-fA-F]{4}[-]?[0-9a-fA-F]{4}[-]?[0-9a-fA-F]{12}[)}]?$"
 )
 
+RUNAFTER_CONTROL_TYPES = {
+    "if",
+    "switch",
+    "scope",
+    "foreach",
+    "until",
+}
+
 PII_FIELD_HINTS = {
     "correo_electronico", "email", "mail", "correo",
     "curp", "rfc",
@@ -354,10 +362,24 @@ def check_hardcode_and_parametrizable(
     action_raw: Dict[str, Any],
     base_path: str
 ) -> List[Finding]:
+    """
+    Regla consolidada por actividad:
+    - 1 finding de Hardcode por actividad
+    - 1 finding de Parametrizable por actividad
+
+    Esto evita generar una incidencia por cada campo detectado dentro
+    de la misma acción.
+    """
     findings: List[Finding] = []
 
     raw_inputs = action_raw.get("inputs")
-    walk_source = raw_inputs if isinstance(raw_inputs, (dict, list, str)) else {}
+    if isinstance(raw_inputs, (dict, list, str)):
+        walk_source = raw_inputs
+    else:
+        walk_source = {}
+
+    hardcode_hits: List[Tuple[str, str]] = []
+    parametrizable_hits: List[Tuple[str, str]] = []
 
     for path, s in _walk_values(walk_source, f"{base_path}.inputs"):
         value = (s or "").strip()
@@ -365,33 +387,134 @@ def check_hardcode_and_parametrizable(
             continue
 
         if _looks_sensitive_literal(path, value):
-            findings.append(Finding(
-                severity_level=3,
-                rule_name="Hardcode",
-                flow_name=flow_name,
-                action_name=action_name,
-                json_path=path,
-                reason="Se detectó un valor sensible hardcodeado dentro de inputs.",
-                evidence=value[:240],
-                impact="Riesgo de exposición de correos, credenciales, tokens o información sensible; además acopla el flujo a una configuración insegura.",
-                fix="Mover este valor a un mecanismo seguro (por ejemplo Key Vault, connection reference o variable de entorno protegida) y resolverlo dinámicamente."
-            ))
+            hardcode_hits.append((path, value))
             continue
 
         if _looks_parametrizable_literal(path, value):
-            findings.append(Finding(
-                severity_level=2,
-                rule_name="Parametrizable",
-                flow_name=flow_name,
-                action_name=action_name,
-                json_path=path,
-                reason="Se detectó un valor fijo no sensible que debería parametrizarse.",
-                evidence=value[:240],
-                impact="Complica promoción entre ambientes, mantenimiento y cambios futuros.",
-                fix="Mover este valor a un mecanismo parametrizable (variables de entorno, parámetros, connection references o configuración central)."
-            ))
+            parametrizable_hits.append((path, value))
+
+    # Consolidar Hardcode a una sola incidencia por actividad
+    if hardcode_hits:
+        unique_paths = []
+        seen_paths = set()
+
+        for path, _ in hardcode_hits:
+            if path not in seen_paths:
+                seen_paths.add(path)
+                unique_paths.append(path)
+
+        sample_paths = unique_paths[:5]
+        total_hits = len(hardcode_hits)
+
+        findings.append(Finding(
+            severity_level=3,
+            rule_name="Hardcode",
+            flow_name=flow_name,
+            action_name=action_name,
+            json_path=base_path,
+            reason=(
+                f"Se detectaron {total_hits} valores sensibles hardcodeados "
+                f"dentro de la misma actividad."
+            ),
+            evidence=" | ".join(sample_paths),
+            impact=(
+                "Riesgo de exposición de correos, credenciales, tokens o información "
+                "sensible; además acopla el flujo a una configuración insegura."
+            ),
+            fix=(
+                "Mover estos valores a un mecanismo seguro "
+                "(por ejemplo Key Vault, connection reference o variable de entorno protegida) "
+                "y resolverlos dinámicamente."
+            )
+        ))
+
+    # Consolidar Parametrizable a una sola incidencia por actividad
+    if parametrizable_hits:
+        unique_paths = []
+        seen_paths = set()
+
+        for path, _ in parametrizable_hits:
+            if path not in seen_paths:
+                seen_paths.add(path)
+                unique_paths.append(path)
+
+        sample_paths = unique_paths[:5]
+        total_hits = len(parametrizable_hits)
+
+        findings.append(Finding(
+            severity_level=2,
+            rule_name="Parametrizable",
+            flow_name=flow_name,
+            action_name=action_name,
+            json_path=base_path,
+            reason=(
+                f"Se detectaron {total_hits} valores fijos no sensibles que "
+                f"deberían parametrizarse dentro de la misma actividad."
+            ),
+            evidence=" | ".join(sample_paths),
+            impact="Complica promoción entre ambientes, mantenimiento y cambios futuros.",
+            fix=(
+                "Mover estos valores a un mecanismo parametrizable "
+                "(variables de entorno, parámetros, connection references o configuración central)."
+            )
+        ))
 
     return findings
+
+def _should_check_runafter(action_name: str, action_raw: Dict[str, Any]) -> bool:
+    """
+    Solo revisar RunAfter en acciones relevantes de integración.
+    Se excluyen estructuras de control y acciones internas simples
+    para reducir ruido en proyectos reales.
+    """
+    action_type = str(action_raw.get("type", "") or "").strip().lower()
+    action_name_low = (action_name or "").strip().lower()
+
+    if action_type in RUNAFTER_CONTROL_TYPES:
+        return False
+
+    control_name_hints = (
+        "condition",
+        "if",
+        "switch",
+        "scope",
+        "apply_to_each",
+        "foreach",
+        "until",
+    )
+
+    if action_name_low in control_name_hints:
+        return False
+
+    if any(action_name_low.startswith(hint) for hint in control_name_hints):
+        return False
+
+    return _is_integration_action(action_raw)
+
+def _is_integration_action(action_raw: Dict[str, Any]) -> bool:
+    """
+    Detecta acciones que sí vale la pena revisar con RunAfter
+    porque suelen implicar integración externa, conectores o llamadas.
+    """
+    action_type = str(action_raw.get("type", "") or "").strip().lower()
+
+    if action_type in {"http", "workflow", "openapiconnection", "apiconnection"}:
+        return True
+
+    inputs = action_raw.get("inputs")
+    if not isinstance(inputs, dict):
+        return False
+
+    host = inputs.get("host")
+    if isinstance(host, dict):
+        api_id = str(host.get("apiId", "") or "").strip()
+        connection_name = str(host.get("connectionName", "") or "").strip()
+        operation_id = str(host.get("operationId", "") or "").strip()
+
+        if api_id or connection_name or operation_id:
+            return True
+
+    return False
 
 
 def check_missing_runafter(
@@ -400,7 +523,18 @@ def check_missing_runafter(
     action_raw: Dict[str, Any],
     base_path: str
 ) -> List[Finding]:
-    if action_raw.get("runAfter") is None:
+    """
+    Regla: Manejo de errores (RunAfter)
+
+    Solo aplica a acciones relevantes. Se excluyen estructuras de control
+    como If, Switch, Scope y Foreach para reducir ruido.
+    """
+    if not _should_check_runafter(action_name, action_raw):
+        return []
+
+    run_after = action_raw.get("runAfter")
+
+    if run_after is None:
         return [Finding(
             severity_level=2,
             rule_name="Manejo de errores (RunAfter)",
@@ -412,8 +546,8 @@ def check_missing_runafter(
             impact="El flujo puede detenerse o comportarse de forma inesperada ante fallos o timeout sin ruta controlada.",
             fix="Configurar RunAfter para failed, timedOut o canceled en acciones relevantes y agregar manejo controlado."
         )]
-    return []
 
+    return []
 
 def check_delay_usage(
     flow_name: str,

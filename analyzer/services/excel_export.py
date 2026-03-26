@@ -90,6 +90,28 @@ def make_target(flow_name: str, action_name: str) -> str:
     ap = action_pretty(action_name)
     return f"{fb} / {ap}".strip(" /")
 
+def make_action_target(action_name: str) -> str:
+    """
+    Solo el nombre amigable de la actividad.
+    Ejemplo:
+    'Initialize_variable_-__ObjM004' -> 'Initialize variable - ObjM004'
+    """
+    return action_pretty(action_name)
+
+
+def build_detail_internal_path(f: dict) -> str:
+    """
+    Para la hoja details:
+    Flow / Actividad
+    """
+    flow_name = (f.get("flow_name") or "").strip()
+    action_name = (f.get("action_name") or "").strip()
+
+    fb = flow_base(flow_name)
+    ap = action_pretty(action_name)
+
+    return " / ".join([x for x in [fb, ap] if x])
+
 
 # =========================
 # 3) Mapping: rule_name -> catálogo
@@ -218,24 +240,26 @@ def build_internal_path(f: dict) -> str:
 # =========================
 def build_findings_rows(findings: List[dict]) -> List[List[str]]:
     """
-    Hoja details: una fila por incidencia
+    Hoja details:
+    - una fila por incidencia
+    - Target = solo actividad
+    - Internal Path = Flow / Actividad :: json_path
     """
     rows: List[List[str]] = []
 
     for f in findings:
         rule_name = (f.get("rule_name") or "").strip()
-        flow_name = (f.get("flow_name") or "").strip()
         action_name = (f.get("action_name") or "").strip()
 
         mapping = map_rule(rule_name)
 
-        rows.append([
-            mapping["title"],
-            build_internal_path(f),
-            make_target(flow_name, action_name),
-            mapping["impact_area"],
-            mapping["suggestion"],
-        ])
+        title = mapping["title"]
+        internal_path = build_detail_internal_path(f)
+        target = make_action_target(action_name)
+        impact_area = mapping["impact_area"]
+        suggestion = mapping["suggestion"]
+
+        rows.append([title, internal_path, target, impact_area, suggestion])
 
     return rows
 
