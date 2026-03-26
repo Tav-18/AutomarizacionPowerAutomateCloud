@@ -13,9 +13,11 @@
   const overlayMessage = document.getElementById("overlayMessage");
   const progress = document.getElementById("progress");
   const fileHint = document.getElementById("fileHint");
-  const uploadForm = document.getElementById("uploadForm");
-  const fileError = document.getElementById("fileError");
-  const projectError = document.getElementById("projectError");
+const uploadForm = document.getElementById("uploadForm");
+const cleanUploadUrl = uploadForm ? uploadForm.dataset.uploadUrl : "/";
+const fileError = document.getElementById("fileError");
+const projectError = document.getElementById("projectError");
+const flowSummaryCard = document.getElementById("flowSummaryCard");
 
   const selectedJsonsContainer = document.getElementById("selectedJsonsContainer");
   const selectedFlowsSummary = document.getElementById("selectedFlowsSummary");
@@ -27,7 +29,50 @@
   const modalTriggers = document.querySelectorAll("[data-modal-open]");
   const modals = document.querySelectorAll(".info-modal");
 
-  if (!uploadForm || !input || !uploader) {
+  const isUploadPage = !!(uploadForm && input && uploader);
+
+  function openModal(modalId) {
+    const modal = document.getElementById(modalId);
+    if (!modal) return;
+
+    modal.hidden = false;
+    modal.setAttribute("aria-hidden", "false");
+    modal.classList.add("is-open");
+    document.body.classList.add("modal-open");
+  }
+
+  function closeModal(modal) {
+    if (!modal) return;
+
+    modal.classList.remove("is-open");
+    modal.setAttribute("aria-hidden", "true");
+    modal.hidden = true;
+    document.body.classList.remove("modal-open");
+  }
+
+  modalTriggers.forEach(function (trigger) {
+    trigger.addEventListener("click", function () {
+      openModal(this.dataset.modalOpen);
+    });
+  });
+
+modals.forEach(function (modal) {
+  modal.addEventListener("click", function (event) {
+    if (event.target === modal || event.target.matches("[data-modal-close]")) {
+      closeModal(modal);
+    }
+  });
+});
+
+  document.addEventListener("keydown", function (event) {
+    if (event.key !== "Escape") return;
+
+    document.querySelectorAll(".info-modal.is-open").forEach(function (modal) {
+      closeModal(modal);
+    });
+  });
+
+  if (!isUploadPage) {
     return;
   }
 
@@ -180,25 +225,6 @@
     uploadForm.submit();
   }
 
-  function openModal(modalId) {
-    const modal = document.getElementById(modalId);
-    if (!modal) return;
-
-    modal.hidden = false;
-    modal.setAttribute("aria-hidden", "false");
-    modal.classList.add("is-open");
-    document.body.classList.add("modal-open");
-  }
-
-  function closeModal(modal) {
-    if (!modal) return;
-
-    modal.classList.remove("is-open");
-    modal.setAttribute("aria-hidden", "true");
-    modal.hidden = true;
-    document.body.classList.remove("modal-open");
-  }
-
   function updateSelectedCount() {
     const total = getSelectedFlowCount();
 
@@ -291,20 +317,44 @@
     }
   });
 
-  if (clearBtn) {
-    clearBtn.setAttribute("type", "button");
-    clearBtn.addEventListener("click", function (event) {
-      event.preventDefault();
-      event.stopPropagation();
+if (clearBtn) {
+  clearBtn.setAttribute("type", "button");
+  clearBtn.addEventListener("click", function (event) {
+    event.preventDefault();
+    event.stopPropagation();
 
-      if (filePill) {
-        filePill.removeAttribute("data-persistent");
-      }
+    if (filePill) {
+      filePill.removeAttribute("data-persistent");
+    }
 
-      input.value = "";
-      resetFileUI(true);
-    });
-  }
+    input.value = "";
+
+    showFileError(false);
+    showProjectError(false);
+    showPickerError(false);
+
+    if (selectedJsonsContainer) {
+      selectedJsonsContainer.innerHTML = "";
+    }
+
+    if (flowSummaryCard) {
+      flowSummaryCard.hidden = true;
+    }
+
+    clearDisplayedFileInfo(true);
+
+    if (analyzeBtn) {
+      analyzeBtn.disabled = true;
+    }
+
+    if (hasPickerState) {
+      window.location.href = cleanUploadUrl;
+      return;
+    }
+
+    resetFileUI(true);
+  });
+}
 
   if (projectInput) {
     projectInput.addEventListener("input", function () {
@@ -362,24 +412,8 @@
         }, 120);
       }
     } catch (error) {
-      // Si el navegador no permite asignar input.files,
-      // solo actualizamos la UI localmente.
       setFileUI(file);
     }
-  });
-
-  modalTriggers.forEach(function (trigger) {
-    trigger.addEventListener("click", function () {
-      openModal(this.dataset.modalOpen);
-    });
-  });
-
-  modals.forEach(function (modal) {
-    modal.addEventListener("click", function (event) {
-      if (event.target.matches("[data-modal-close]")) {
-        closeModal(modal);
-      }
-    });
   });
 
   if (selectAllBtn) {
@@ -421,14 +455,6 @@
       });
     });
   }
-
-  document.addEventListener("keydown", function (event) {
-    if (event.key !== "Escape") return;
-
-    document.querySelectorAll(".info-modal.is-open").forEach(function (modal) {
-      closeModal(modal);
-    });
-  });
 
   uploadForm.addEventListener("submit", function (event) {
     // Si todavía no existe el estado del picker, este submit es el de descubrimiento automático

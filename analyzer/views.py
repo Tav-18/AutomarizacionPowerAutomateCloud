@@ -3,6 +3,7 @@ import re
 import uuid
 import time
 import shutil
+import math
 import tempfile
 from pathlib import Path
 from io import BytesIO
@@ -46,7 +47,78 @@ def _action_key(flow_name: str, action_name: str) -> str:
 
 PICKER_ROOT = Path(tempfile.gettempdir()) / "pa_flow_picker"
 
+def _safe_pct(value) -> float:
+    try:
+        return max(0.0, min(float(value or 0), 100.0))
+    except (TypeError, ValueError):
+        return 0.0
 
+
+def _build_analysis_status(compliance_rate: float, total_findings: int) -> dict:
+    if total_findings > 100:
+        return {
+            "label": "Rejected",
+            "variant": "rejected",
+            "is_rejected": True,
+        }
+
+    if compliance_rate >= 95:
+        return {
+            "label": "Passed",
+            "variant": "passed",
+            "is_rejected": False,
+        }
+
+    return {
+        "label": "Not Passed",
+        "variant": "not-passed",
+        "is_rejected": False,
+    }
+
+
+def _build_compliance_core(compliance_rate: float, total_findings: int) -> dict:
+    pct = _safe_pct(compliance_rate)
+    is_rejected = total_findings > 100
+
+    if is_rejected:
+        display_pct = 0
+        theme = "red"
+        tier = "Rejected"
+        helper = "This analysis was rejected because the total number of findings exceeded the allowed threshold."
+        filled_segments = 0
+    else:
+        display_pct = pct
+
+        if pct >= 90:
+            theme = "green"
+            tier = "Optimal"
+            helper = "Healthy overall adherence to best practices."
+        elif pct >= 80:
+            theme = "yellow"
+            tier = "Stable"
+            helper = "Minor drift detected. Review is recommended."
+        elif pct >= 60:
+            theme = "orange"
+            tier = "Warning"
+            helper = "Several improvements are needed before approval."
+        else:
+            theme = "red"
+            tier = "Critical"
+            helper = "Low health score. Immediate remediation is recommended."
+
+        filled_segments = max(0, min(20, math.floor(display_pct / 5)))
+
+    segments = [{"filled": i < filled_segments} for i in range(20)]
+
+    return {
+        "theme": theme,
+        "tier": tier,
+        "helper": helper,
+        "display_pct": int(display_pct) if float(display_pct).is_integer() else round(display_pct, 1),
+        "filled_segments": filled_segments,
+        "segments": segments,
+    }
+    
 def _ensure_picker_root():
     PICKER_ROOT.mkdir(parents=True, exist_ok=True)
 
@@ -449,9 +521,13 @@ def result_view(request, run_id: str):
         )
 
     findings = data.get("findings", [])
-
     counts = Counter([(f.get("rule_name") or "Unknown") for f in findings])
-    top_rules = counts.most_common(6)
+    rule_rows = sorted(counts.items(), key=lambda item: (-item[1], item[0].lower()))
+    passed_actions_pct = _safe_pct(data.get("passed_actions_pct", 0))
+    total_findings = len(findings)
+
+    status = _build_analysis_status(passed_actions_pct, total_findings)
+    compliance_core = _build_compliance_core(passed_actions_pct, total_findings)
 
     return render(
         request,
@@ -460,16 +536,27 @@ def result_view(request, run_id: str):
             "run_id": run_id,
             "project_id": data.get("project_id", ""),
             "findings": findings,
-            "top_rules": top_rules,
+            "rule_rows": rule_rows,
             "total_json": data.get("total_json", 0),
             "total_flows": data.get("total_flows", 0),
             "total_actions": data.get("total_actions", 0),
             "flagged_actions_count": data.get("flagged_actions_count", 0),
             "passed_actions_count": data.get("passed_actions_count", 0),
-            "passed_actions_pct": data.get("passed_actions_pct", 0),
+            "passed_actions_pct": passed_actions_pct,
+            "total_findings": total_findings,
+
+            "status_label": status["label"],
+            "status_variant": status["variant"],
+            "is_rejected": status["is_rejected"],
+
+            "compliance_theme": compliance_core["theme"],
+            "compliance_tier": compliance_core["tier"],
+            "compliance_helper": compliance_core["helper"],
+            "compliance_display_pct": compliance_core["display_pct"],
+            "compliance_segments": compliance_core["segments"],
+            "compliance_segments_filled": compliance_core["filled_segments"],
         },
     )
-
 
 def download_excel(request, run_id: str):
     data = request.session.get(f"run:{run_id}")

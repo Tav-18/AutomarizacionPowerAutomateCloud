@@ -13,14 +13,15 @@
     </div>
   </div>
 
-  <form
-    method="post"
-    enctype="multipart/form-data"
-    class="form form-clean"
-    id="uploadForm"
-    novalidate
-    action="{% if pick_id %}{% url 'select_jsons' pick_id=pick_id %}{% else %}{% url 'upload' %}{% endif %}"
-  >
+<form
+  method="post"
+  enctype="multipart/form-data"
+  class="form form-clean"
+  id="uploadForm"
+  novalidate
+  data-upload-url="{% url 'upload' %}"
+  action="{% if pick_id %}{% url 'select_jsons' pick_id=pick_id %}{% else %}{% url 'upload' %}{% endif %}"
+>
     {% csrf_token %}
 
     <div class="stack-fields stack-fields--clean">
@@ -75,7 +76,13 @@
   </div>
 
   <span class="badge-mini badge-mini--success">Ready</span>
-  <button type="button" class="pill-x" id="clearBtn" aria-label="Remove file">×</button>
+<button
+  type="button"
+  class="pill-x"
+  id="clearBtn"
+  aria-label="Remove file and start over"
+  title="Remove file and start over"
+>×</button>
 </div>
 
           {% if show_json_picker %}
