@@ -390,7 +390,7 @@ def select_jsons_view(request, pick_id: str):
         return redirect("upload")
 
     candidates = data.get("candidates", [])
-    project_id = data.get("project_id", "")
+    project_id = (request.POST.get("project_id") or data.get("project_id", "")).strip()
 
     if request.method == "POST":
         selected_ids = request.POST.getlist("selected_jsons")
