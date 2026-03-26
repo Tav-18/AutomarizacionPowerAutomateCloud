@@ -100,10 +100,6 @@ def make_action_target(action_name: str) -> str:
 
 
 def build_detail_internal_path(f: dict) -> str:
-    """
-    Para la hoja details:
-    Flow / Actividad
-    """
     flow_name = (f.get("flow_name") or "").strip()
     action_name = (f.get("action_name") or "").strip()
 
@@ -112,6 +108,29 @@ def build_detail_internal_path(f: dict) -> str:
 
     return " / ".join([x for x in [fb, ap] if x])
 
+
+def make_action_target(action_name: str) -> str:
+    return action_pretty(action_name)
+
+
+def build_findings_rows(findings: List[dict]) -> List[List[str]]:
+    rows: List[List[str]] = []
+
+    for f in findings:
+        rule_name = (f.get("rule_name") or "").strip()
+        action_name = (f.get("action_name") or "").strip()
+
+        mapping = map_rule(rule_name)
+
+        rows.append([
+            mapping["title"],
+            build_detail_internal_path(f),
+            make_action_target(action_name),
+            mapping["impact_area"],
+            mapping["suggestion"],
+        ])
+
+    return rows
 
 # =========================
 # 3) Mapping: rule_name -> catálogo
@@ -234,6 +253,16 @@ def build_internal_path(f: dict) -> str:
         return flow_rel
     return json_path_clean
 
+def build_azure_internal_path(f: dict) -> str:
+    """
+    Para la hoja azure_ready:
+    solo el nombre amigable de la actividad,
+    sin json_path técnico tipo actions....
+    """
+    action_name = (f.get("action_name") or "").strip()
+    return action_pretty(action_name)
+
+
 
 # =========================
 # 5) Build rows
@@ -264,10 +293,16 @@ def build_findings_rows(findings: List[dict]) -> List[List[str]]:
     return rows
 
 
+def build_azure_internal_path(f: dict) -> str:
+    """
+    Para la hoja azure_ready:
+    solo el nombre amigable de la actividad.
+    """
+    action_name = (f.get("action_name") or "").strip()
+    return action_pretty(action_name)
+
+
 def build_azure_like_rows(findings: List[dict]) -> List[List[str]]:
-    """
-    Hoja azure_ready: agrupada, con columnas vacías para las no automatizadas
-    """
     grouped: Dict[tuple, Dict[str, object]] = {}
 
     for f in findings:
@@ -278,7 +313,7 @@ def build_azure_like_rows(findings: List[dict]) -> List[List[str]]:
         mapping = map_rule(rule_name)
 
         title = mapping["title"]
-        internal_path = build_internal_path(f)
+        internal_path = build_azure_internal_path(f)
         target = make_target(flow_name, action_name)
         impact_area = mapping["impact_area"]
         suggestion = mapping["suggestion"]
@@ -327,7 +362,6 @@ def build_azure_like_rows(findings: List[dict]) -> List[List[str]]:
     rows.sort(key=lambda r: (r[4], r[7]))
     return rows
 
-
 # =========================
 # 6) Sheet writer
 # =========================
@@ -372,6 +406,42 @@ def _write_sheet(ws, headers, rows, col_widths=None, wrap_cols=None):
 # =========================
 # 7) Export
 # =========================
+from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
+
+
+def _write_sheet(ws, headers, rows, col_widths=None, wrap_cols=None):
+    thin = Side(style="thin", color="D9DEE8")
+    border = Border(left=thin, right=thin, top=thin, bottom=thin)
+
+    header_font = Font(bold=True, color="FFFFFF")
+    header_fill = PatternFill("solid", fgColor="4F46E5")
+    header_alignment = Alignment(vertical="center", horizontal="left", wrap_text=True)
+
+    ws.append(headers)
+
+    for col_idx, _ in enumerate(headers, start=1):
+        cell = ws.cell(row=1, column=col_idx)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = header_alignment
+        cell.border = border
+
+    for r in rows:
+        ws.append(r)
+
+    for row in ws.iter_rows(min_row=2, max_row=len(rows) + 1):
+        for cell in row:
+            cell.alignment = Alignment(wrap_text=True, vertical="top")
+            cell.border = border
+
+    if col_widths:
+        for col_idx, w in col_widths.items():
+            ws.column_dimensions[get_column_letter(col_idx)].width = w
+
+    ws.freeze_panes = "A2"
+    ws.auto_filter.ref = f"A1:{get_column_letter(len(headers))}{max(1, len(rows) + 1)}"
+
+
 def export_findings_to_xlsx(
     out_path,
     findings: List[dict],
@@ -389,11 +459,11 @@ def export_findings_to_xlsx(
     azure_rows = build_azure_like_rows(findings)
 
     detail_widths = {
-        1: 28,  # Title
-        2: 70,  # Internal Path
-        3: 46,  # Target
-        4: 24,  # Impact area
-        5: 90,  # Suggestion
+        1: 28,
+        2: 70,
+        3: 46,
+        4: 24,
+        5: 90,
     }
 
     azure_widths = {
@@ -402,8 +472,8 @@ def export_findings_to_xlsx(
         3: 18,   # Tags
         4: 18,   # Work Item Type
         5: 28,   # Title
-        6: 70,   # Internal Path
-        7: 46,   # Target
+        6: 55,   # Internal Path
+        7: 55,   # Target
         8: 24,   # Impact area
         9: 90,   # Suggestion
         10: 18,  # Incidents Repeats
