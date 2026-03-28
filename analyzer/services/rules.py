@@ -61,6 +61,29 @@ RUNAFTER_CONTROL_TYPES = {
     "until",
 }
 
+RUNAFTER_RELEVANT_ACTION_TYPES = {
+    "http",
+    "workflow",
+    "response",
+    "parsejson",
+}
+
+RUNAFTER_RELEVANT_OPERATION_IDS = {
+    "getfileitems",
+    "getitem",
+    "getitems",
+    "getrow",
+    "getrows",
+    "getfilemetadata",
+    "getfilemetadatausingpath",
+}
+
+RUNAFTER_EXCLUDED_OPERATION_IDS = {
+    "createfile",
+    "updatefile",
+    "createfileitem",
+}
+
 PII_FIELD_HINTS = {
     "correo_electronico", "email", "mail", "correo",
     "curp", "rfc",
@@ -264,11 +287,59 @@ def _extract_initialized_variable_names(
 
 def _looks_sensitive_literal(path: str, value: str) -> bool:
     value = (value or "").strip()
-    if not value or _is_dynamic_reference(value) or _is_system_value(value):
+    path_low = (path or "").lower()
+
+    if not value:
+        return False
+
+    if _is_dynamic_reference(value) or _is_system_value(value):
+        return False
+
+    if _is_schema_path(path):
+        return False
+
+    if _is_connector_plumbing_path(path):
         return False
 
     leaf = _leaf_path_name(path)
     parent = _parent_path_name(path)
+
+    # excluir textos operativos muy comunes
+    non_sensitive_literals = {
+        "ok",
+        "na",
+        "n/a",
+        "exception",
+        "true",
+        "false",
+        "null",
+        "string",
+        "object",
+        "array",
+        "integer",
+        "number",
+        "boolean",
+        "bearer_token",
+        "client_credential",
+        "default",
+        "prod",
+        "post",
+        "get",
+    }
+
+    if value.lower() in non_sensitive_literals:
+        return False
+
+    # excluir paths de mensajes/respuestas
+    non_sensitive_path_tokens = (
+        ".message",
+        ".status",
+        ".reentry",
+        ".authenticationmethod",
+        ".granttype",
+    )
+    if any(token in path_low for token in non_sensitive_path_tokens):
+        return False
 
     if leaf == "name":
         return False
@@ -280,6 +351,8 @@ def _looks_sensitive_literal(path: str, value: str) -> bool:
         return True
 
     if leaf in PII_FIELD_HINTS or parent in PII_FIELD_HINTS:
+        if value.lower() in {"string", "object", "array", "integer", "number", "boolean", "null"}:
+            return False
         return True
 
     if CURP_RE.match(value):
@@ -296,6 +369,51 @@ def _looks_sensitive_literal(path: str, value: str) -> bool:
 
     return False
 
+def _is_schema_path(path: str) -> bool:
+    path_low = (path or "").lower()
+
+    schema_tokens = (
+        ".schema.",
+        ".properties.",
+        ".items.",
+        ".required[",
+        ".type",
+        ".title",
+        ".description",
+        "x-ms-",
+    )
+
+    return any(token in path_low for token in schema_tokens)
+
+
+def _is_connector_plumbing_path(path: str) -> bool:
+    path_low = (path or "").lower()
+
+    noisy_tokens = (
+        ".inputs.parameters.dataset",
+        ".inputs.parameters.source",
+        ".inputs.parameters.folderpath",
+        ".inputs.parameters.id",
+        ".inputs.parameters.name",
+        ".inputs.host.apiid",
+        ".inputs.host.connectionname",
+        ".inputs.host.operationid",
+        ".runtimeconfiguration.",
+    )
+
+    return any(token in path_low for token in noisy_tokens)
+
+
+def _is_child_flow_path(path: str) -> bool:
+    path_low = (path or "").lower()
+
+    child_flow_tokens = (
+        ".inputs.host.workflowreferencename",
+        ".host.workflowreferencename",
+        ".workflowreferencename",
+    )
+
+    return any(token in path_low for token in child_flow_tokens)
 
 def _looks_parametrizable_literal(path: str, value: str) -> bool:
     value = (value or "").strip()
@@ -303,6 +421,15 @@ def _looks_parametrizable_literal(path: str, value: str) -> bool:
     leaf = _leaf_path_name(path)
 
     if not value:
+        return False
+
+    if _is_schema_path(path):
+        return False
+
+    if _is_connector_plumbing_path(path):
+        return False
+
+    if _is_child_flow_path(path):
         return False
 
     if _is_dynamic_reference(value) or _is_system_value(value):
@@ -320,9 +447,28 @@ def _looks_parametrizable_literal(path: str, value: str) -> bool:
     if leaf in PII_FIELD_HINTS:
         return False
 
+    # excluir nombres/refs de workflows
+    workflow_tokens = (
+        "workflowreferencename",
+        "childflow",
+        "run a child flow",
+    )
+    if any(token in path_low for token in workflow_tokens):
+        return False
+
     field_looks_configurable = any(token in leaf for token in PARAMETRIZABLE_HINTS)
+
     if not field_looks_configurable:
         field_looks_configurable = any(f".{token}" in path_low for token in PARAMETRIZABLE_HINTS)
+
+    # permitir explícitamente rutas de archivo/tabla/drive aunque no entren por hints
+    if not field_looks_configurable:
+        explicit_param_tokens = (
+            ".inputs.parameters.file",
+            ".inputs.parameters.table",
+            ".inputs.parameters.drive",
+        )
+        field_looks_configurable = any(token in path_low for token in explicit_param_tokens)
 
     if not field_looks_configurable:
         return False
@@ -340,9 +486,6 @@ def _looks_parametrizable_literal(path: str, value: str) -> bool:
     if "sharepoint.com" in low_value or "blob.core.windows.net" in low_value:
         return True
 
-    if any(token in leaf for token in ("source", "drive", "dataset", "table")):
-        return True
-
     if GUID_RE.match(value):
         return True
 
@@ -350,7 +493,6 @@ def _looks_parametrizable_literal(path: str, value: str) -> bool:
         return True
 
     return False
-
 
 # =========================
 # Rules (Action level)
@@ -461,14 +603,36 @@ def check_hardcode_and_parametrizable(
 
     return findings
 
-def _should_check_runafter(action_name: str, action_raw: Dict[str, Any]) -> bool:
+def _get_operation_id(action_raw: Dict[str, Any]) -> str:
+    inputs = action_raw.get("inputs")
+    if not isinstance(inputs, dict):
+        return ""
+
+    host = inputs.get("host")
+    if not isinstance(host, dict):
+        return ""
+
+    return str(host.get("operationId", "") or "").strip().lower()
+
+
+def _is_nested_control_path(base_path: str) -> bool:
     """
-    Solo revisar RunAfter en acciones relevantes de integración.
-    Se excluyen estructuras de control y acciones internas simples
-    para reducir ruido en proyectos reales.
+    Detecta si la acción vive dentro de una rama/estructura,
+    pero NO debe usarse para excluir todas las nested actions operativas.
     """
+    path = (base_path or "").lower()
+
+    return any(token in path for token in (
+        ".else.actions.",
+        ".cases.",
+        ".defaultcase.actions.",
+        ".branches[",
+    ))
+
+def _should_check_runafter(action_name: str, action_raw: Dict[str, Any], base_path: str) -> bool:
     action_type = str(action_raw.get("type", "") or "").strip().lower()
     action_name_low = (action_name or "").strip().lower()
+    operation_id = _get_operation_id(action_raw)
 
     if action_type in RUNAFTER_CONTROL_TYPES:
         return False
@@ -489,7 +653,16 @@ def _should_check_runafter(action_name: str, action_raw: Dict[str, Any]) -> bool
     if any(action_name_low.startswith(hint) for hint in control_name_hints):
         return False
 
-    return _is_integration_action(action_raw)
+    if operation_id in RUNAFTER_EXCLUDED_OPERATION_IDS:
+        return False
+
+    if action_type in RUNAFTER_RELEVANT_ACTION_TYPES:
+        return True
+
+    if operation_id in RUNAFTER_RELEVANT_OPERATION_IDS:
+        return True
+
+    return False
 
 def _is_integration_action(action_raw: Dict[str, Any]) -> bool:
     """
@@ -523,13 +696,7 @@ def check_missing_runafter(
     action_raw: Dict[str, Any],
     base_path: str
 ) -> List[Finding]:
-    """
-    Regla: Manejo de errores (RunAfter)
-
-    Solo aplica a acciones relevantes. Se excluyen estructuras de control
-    como If, Switch, Scope y Foreach para reducir ruido.
-    """
-    if not _should_check_runafter(action_name, action_raw):
+    if not _should_check_runafter(action_name, action_raw, base_path):
         return []
 
     run_after = action_raw.get("runAfter")
