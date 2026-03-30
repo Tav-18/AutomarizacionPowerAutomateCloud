@@ -64,18 +64,153 @@ modals.forEach(function (modal) {
   });
 });
 
-  document.addEventListener("keydown", function (event) {
-    if (event.key !== "Escape") return;
+document.addEventListener("keydown", function (event) {
+  if (event.key !== "Escape") return;
 
-    document.querySelectorAll(".info-modal.is-open").forEach(function (modal) {
-      closeModal(modal);
-    });
+  document.querySelectorAll(".info-modal.is-open").forEach(function (modal) {
+    closeModal(modal);
   });
+});
 
-  if (!isUploadPage) {
+/* ==========================================================================
+   Findings table pagination
+   ========================================================================== */
+(function initFindingsPagination() {
+  const table = document.getElementById("findingDetailsTable");
+  const pageSizeSelect = document.getElementById("findingsPageSize");
+  const pagination = document.getElementById("findingsPagination");
+  const meta = document.getElementById("findingsTableMeta");
+
+  if (!table || !pageSizeSelect || !pagination || !meta) {
     return;
   }
 
+  const body = table.querySelector("tbody");
+  if (!body) return;
+
+  const allRows = Array.from(body.querySelectorAll("tr")).filter((row) => {
+    return !row.querySelector(".empty-state-cell");
+  });
+
+  if (!allRows.length) {
+    meta.textContent = "Showing 0 to 0 of 0 findings";
+    pagination.hidden = true;
+    return;
+  }
+
+  let currentPage = 1;
+  let pageSize = Number(pageSizeSelect.value) || 10;
+
+  function getTotalPages() {
+    return Math.max(1, Math.ceil(allRows.length / pageSize));
+  }
+
+  function updateMeta(startIndex, endIndex) {
+    meta.textContent = `Showing ${startIndex} to ${endIndex} of ${allRows.length} findings`;
+  }
+
+  function createButton(label, onClick, options = {}) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "table-page-btn";
+    btn.textContent = label;
+
+    if (options.active) {
+      btn.classList.add("is-active");
+    }
+
+    if (options.disabled) {
+      btn.disabled = true;
+    }
+
+    btn.addEventListener("click", onClick);
+    return btn;
+  }
+
+  function renderPagination() {
+    const totalPages = getTotalPages();
+    pagination.innerHTML = "";
+
+    if (totalPages <= 1) {
+      pagination.hidden = true;
+      return;
+    }
+
+    pagination.hidden = false;
+
+    const prevBtn = createButton(
+      "Previous",
+      function () {
+        if (currentPage > 1) {
+          currentPage -= 1;
+          renderRows();
+        }
+      },
+      { disabled: currentPage === 1 }
+    );
+
+    pagination.appendChild(prevBtn);
+
+    for (let page = 1; page <= totalPages; page += 1) {
+      const pageBtn = createButton(
+        String(page),
+        function () {
+          currentPage = page;
+          renderRows();
+        },
+        { active: page === currentPage }
+      );
+
+      pagination.appendChild(pageBtn);
+    }
+
+    const nextBtn = createButton(
+      "Next",
+      function () {
+        if (currentPage < totalPages) {
+          currentPage += 1;
+          renderRows();
+        }
+      },
+      { disabled: currentPage === totalPages }
+    );
+
+    pagination.appendChild(nextBtn);
+  }
+
+  function renderRows() {
+    const totalPages = getTotalPages();
+
+    if (currentPage > totalPages) {
+      currentPage = totalPages;
+    }
+
+    const start = (currentPage - 1) * pageSize;
+    const end = start + pageSize;
+
+    allRows.forEach((row, index) => {
+      row.style.display = index >= start && index < end ? "" : "none";
+    });
+
+    const visibleStart = allRows.length ? start + 1 : 0;
+    const visibleEnd = Math.min(end, allRows.length);
+
+    updateMeta(visibleStart, visibleEnd);
+    renderPagination();
+  }
+
+  pageSizeSelect.addEventListener("change", function () {
+    pageSize = Number(this.value) || 10;
+    currentPage = 1;
+    renderRows();
+  });
+
+  renderRows();
+})();
+
+if (!isUploadPage) {
+  return;
+}
   const hasPickerState = !!selectedJsonsContainer;
   const hasPersistentUpload = !!(filePill && filePill.dataset.persistent === "true");
 
@@ -516,4 +651,199 @@ if (clearBtn) {
   } else {
     syncAnalyzeState();
   }
+}
+
+)();
+
+(function initPulseCanvas() {
+  var canvas = document.getElementById("pulse-canvas");
+  if (!canvas) return;
+
+  var host = canvas.closest("[data-compliance-theme]") || document.querySelector(".metric-card--core");
+  var theme = host && host.dataset && host.dataset.complianceTheme
+    ? host.dataset.complianceTheme
+    : ((host && host.className) || "");
+
+  var state = "green";
+  ["green", "yellow", "orange", "red", "rejected"].forEach(function (s) {
+    if (theme.indexOf(s) !== -1) state = s;
+  });
+
+var CONFIGS = {
+  green:    { amp: 29, noise: 2.2, period: 82, speed: 0.38, color: "#22c55e" },
+  yellow:   { amp: 23, noise: 1.6, period: 66, speed: 0.55, color: "#eab308" },
+  orange:   { amp: 17, noise: 1.0, period: 54, speed: 0.70, color: "#f97316" },
+  red:      { amp: 11, noise: 0.5, period: 44, speed: 0.88, color: "#ef4444" },
+  rejected: { amp: 0,  noise: 0.0, period: 80, speed: 0.18, color: "#9ca3af" }
+};
+
+  var cfg = CONFIGS[state] || CONFIGS.green;
+  var isRejected = state === "rejected";
+
+  var dpr = window.devicePixelRatio || 1;
+  var ctx, W, H, offset = 0, startTime = performance.now();
+
+  function resize() {
+    var rect = canvas.getBoundingClientRect();
+    canvas.width = Math.max(1, Math.floor(rect.width * dpr));
+    canvas.height = Math.max(1, Math.floor(rect.height * dpr));
+    ctx = canvas.getContext("2d");
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.scale(dpr, dpr);
+    W = rect.width;
+    H = rect.height;
+  }
+
+  function makePoints() {
+  var pts = [];
+  var base = 29;
+
+  // Perfil tipo ECG con picos más triangulares
+  // t va de 0 a 1 dentro de cada periodo
+  function heartbeatShape(t, amp) {
+    if (t < 0.12) {
+      return 0; // línea base
+    } else if (t < 0.18) {
+      // pequeña subida previa
+      return -amp * ((t - 0.12) / 0.06) * 0.18;
+    } else if (t < 0.22) {
+      // regreso a base
+      return -amp * (1 - (t - 0.18) / 0.04) * 0.18;
+    } else if (t < 0.28) {
+  return -amp * ((t - 0.22) / 0.06);
+} else if (t < 0.33) {
+  return -amp + (amp * 1.65) * ((t - 0.28) / 0.05);
+} else if (t < 0.44) {
+      // rebote de recuperación
+      return amp * 0.55 - (amp * 0.70) * ((t - 0.36) / 0.08);
+    } else if (t < 0.58) {
+      // estabilización
+      return -amp * 0.15 * (1 - (t - 0.44) / 0.14);
+    } else {
+      return 0; // línea base
+    }
+  }
+
+  for (var x = 0; x <= 380; x++) {
+    if (isRejected) {
+      pts.push(base);
+      continue;
+    }
+
+    var t = (x % cfg.period) / cfg.period;
+    var y = base + heartbeatShape(t, cfg.amp);
+
+    // un poco de microvariación para que no se vea demasiado rígido
+    y += (Math.random() - 0.5) * cfg.noise * 0.35;
+
+    pts.push(y);
+  }
+
+  return pts;
+}
+
+  function drawNormal() {
+    var pts = makePoints();
+    var total = pts.length;
+
+    ctx.clearRect(0, 0, W, H);
+    ctx.strokeStyle = cfg.color;
+    ctx.lineWidth = 1.6;
+    ctx.lineJoin = "round";
+    ctx.lineCap = "round";
+    ctx.shadowColor = cfg.color;
+    ctx.shadowBlur = 6;
+
+    ctx.beginPath();
+
+for (var i = 0; i < total; i++) {
+  var idx = Math.floor(i + offset) % total;
+  var x = (i / (total - 1)) * W;
+  var y = (pts[idx] / 58) * H;
+
+  if (i === 0) {
+    ctx.moveTo(x, y);
+  } else {
+    var prevIdx = Math.floor(i - 1 + offset) % total;
+    var prevX = ((i - 1) / (total - 1)) * W;
+    var prevY = (pts[prevIdx] / 58) * H;
+
+    var cx = (prevX + x) / 2;
+    var cy = (prevY + y) / 2;
+
+    ctx.quadraticCurveTo(prevX, prevY, cx, cy);
+  }
+}
+
+ctx.stroke();
+
+    var dotI = Math.floor(total * 0.97);
+    var dotIdx = (dotI + Math.floor(offset)) % total;
+    var dotX = (dotI / (total - 1)) * W;
+    var dotY = (pts[dotIdx] / 58) * H;
+
+    ctx.beginPath();
+    ctx.arc(dotX, dotY, 2.6, 0, Math.PI * 2);
+    ctx.fillStyle = cfg.color;
+    ctx.shadowBlur = 10;
+    ctx.fill();
+
+    offset = (offset + cfg.speed) % total;
+  }
+
+  function drawRejected(now) {
+    var t = (now - startTime) / 1000;
+    var y = H * 0.5;
+
+    ctx.clearRect(0, 0, W, H);
+
+    // línea plana
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(W, y);
+    ctx.strokeStyle = "rgba(127,29,29,0.40)";
+    ctx.lineWidth = 1.5;
+    ctx.shadowBlur = 0;
+    ctx.stroke();
+
+    // punto viajando de izquierda a derecha
+    var progress = (t * 0.32) % 1; // velocidad
+    var dotX = progress * W;
+
+    // rastro
+    var trail = ctx.createLinearGradient(dotX - 46, 0, dotX, 0);
+    trail.addColorStop(0, "rgba(185,28,28,0)");
+    trail.addColorStop(1, "rgba(185,28,28,0.30)");
+    ctx.beginPath();
+    ctx.moveTo(Math.max(0, dotX - 46), y);
+    ctx.lineTo(dotX, y);
+    ctx.strokeStyle = trail;
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    // punto principal
+    ctx.beginPath();
+    ctx.arc(dotX, y, 3.2, 0, Math.PI * 2);
+    ctx.fillStyle = "#dc2626";
+    ctx.shadowColor = "rgba(220,38,38,0.75)";
+    ctx.shadowBlur = 12;
+    ctx.fill();
+
+    // pequeño destello al reiniciar
+    if (progress < 0.03) {
+      ctx.fillStyle = "rgba(255,255,255,0.06)";
+      ctx.fillRect(0, 0, W, H);
+    }
+  }
+
+  function animate(now) {
+    if (!ctx) return;
+    if (isRejected) drawRejected(now);
+    else drawNormal();
+    requestAnimationFrame(animate);
+  }
+
+  resize();
+  window.addEventListener("resize", resize);
+  requestAnimationFrame(animate);
 })();
