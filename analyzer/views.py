@@ -82,7 +82,7 @@ def _build_compliance_core(compliance_rate: float, total_findings: int) -> dict:
 
     if is_rejected:
         display_pct = 0
-        theme = "red"
+        theme = "rejected"
         tier = "Rejected"
         helper = "This analysis was rejected because the total number of findings exceeded the allowed threshold."
         filled_segments = 0

@@ -7,7 +7,7 @@
     <div class="ready-head ready-head--result">
       <div class="ready-copy">
         <h1 class="ready-title">Analysis Summary</h1>
-        <p class="ready-sub">Review of the main metrics, total findings, and overall analysis status.</p>
+        <p class="ready-sub">Review of the main metrics, total Incidents, and overall analysis status.</p>
       </div>
 
 <div class="ready-actions">
@@ -31,22 +31,28 @@
   <article class="metric-card metric-card--core metric-card--{{ compliance_theme }}">
     <div class="core-shell">
       <div class="core-shell__grid"></div>
-
+      
       <div class="core-head">
+        <div class="icon-wrap">
+  <svg viewBox="0 0 24 24">
+    <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
+  </svg>
+</div>
         <div>
-          <p class="core-title">Coding Health Score</p>
+          <p class="core-title">Coding Health Score: </p>
         </div>
 
         <span class="core-tier core-tier--{{ compliance_theme }}">
           {{ compliance_tier }}
         </span>
+
+        <strong class="metric-value core-value">{{ compliance_display_pct }}%</strong>
       </div>
 
       <div class="core-body">
-        <div class="core-readout">
-          <strong class="metric-value core-value">{{ compliance_display_pct }}%</strong>
-          <span class="core-caption">System Integrity</span>
-        </div>
+<div class="core-readout">
+  <canvas id="pulse-canvas"></canvas>
+</div>
 
         <div
           class="core-bar"
@@ -92,7 +98,7 @@
   </article>
 
   <article class="metric-card metric-card--findings-total">
-    <span class="metric-label">Total Findings</span>
+    <span class="metric-label">Total Incidents</span>
     <strong class="metric-value">{{ total_findings }}</strong>
   </article>
 </div>
@@ -102,7 +108,7 @@
       <div class="section-block">
   <div class="section-head section-head--spaced">
     <div class="section-head__content">
-      <h2 class="section-title">Rules with Findings</h2>
+      <h2 class="section-title">Rules with Incidents</h2>
       <p class="section-subtitle">Rules that were triggered during this analysis.</p>
     </div>
 
@@ -125,7 +131,7 @@
       <thead>
         <tr>
           <th>Rule</th>
-          <th>Findings</th>
+          <th>Incidents</th>
         </tr>
       </thead>
       <tbody>
@@ -137,7 +143,7 @@
                 <span class="badge-mini badge-count badge-count--3">{{ cnt }}</span>
               {% elif rule == "Parametrizable" or rule == "Manejo de errores (RunAfter)" or rule == "Retrasos" %}
                 <span class="badge-mini badge-count badge-count--2">{{ cnt }}</span>
-              {% elif rule == "Nomenclatura de actidades" or rule == "Nomenclatura de variables" or rule == "Prefijos variables / parámetros" or rule == "Nomenclatura de flujos" or rule == "Condición IF" or rule == "Comentarios" %}
+              {% elif rule == "Nomenclatura de actividades" or rule == "Nomenclatura de variables" or rule == "Prefijos variables / parámetros" or rule == "Nomenclatura de flujos" or rule == "Condición IF" or rule == "Comentarios" %}
                 <span class="badge-mini badge-count badge-count--1">{{ cnt }}</span>
               {% else %}
                 <span class="badge-mini badge-count">{{ cnt }}</span>
@@ -160,7 +166,7 @@
         </div>
 
         <div class="result-actions-bar__buttons">
-          <a class="btn btn-primary" href="{% url 'download_excel' run_id %}">Download Findings Report</a>
+          <a class="btn btn-primary" href="{% url 'download_excel' run_id %}">Download Incidents Report</a>
           <a class="btn btn-secondary" href="{% url 'upload' %}">Back to Home</a>
         </div>
       </div>
@@ -179,26 +185,28 @@
 >
   <div class="info-modal__backdrop" data-modal-close></div>
 
-  <div class="info-modal__dialog">
-    <div class="info-modal__header">
-      <div>
-        <h2 class="section-title" id="rulesInfoTitle">Reviewed Rules</h2>
-        <p class="section-subtitle">
-          Rule definitions, severity levels, and evaluation purpose used by the analyzer.
-        </p>
-      </div>
+<div class="info-modal__dialog">
+  <div class="info-modal__chrome">
+    <button
+      type="button"
+      class="info-modal__close"
+      aria-label="Close rules information"
+      data-modal-close
+    >
+      ×
+    </button>
+  </div>
 
-      <button
-        type="button"
-        class="info-modal__close"
-        aria-label="Close rules information"
-        data-modal-close
-      >
-        ×
-      </button>
+  <div class="info-modal__header">
+    <div>
+      <h2 class="section-title" id="rulesInfoTitle">Reviewed Rules</h2>
+      <p class="section-subtitle">
+        Rule definitions, severity levels, and evaluation purpose used by the analyzer.
+      </p>
     </div>
+  </div>
 
-    <div class="info-modal__grid">
+  <div class="info-modal__grid">
       <article class="rule-info-card">
         <div class="rule-info-card__head">
           <h3 class="rule-info-card__title">Hardcode</h3>
@@ -299,17 +307,10 @@
         </p>
       </article>
     </div>
-
-    <div class="info-modal__footer">
-      <button type="button" class="btn btn-primary" data-modal-close>Understood</button>
-    </div>
   </div>
 </div>
-
-    <script src="{% static 'analyzer/upload_analyzer.js' %}"></script>
   {% endif %}
 {% endblock %}
-
 {% block fullbleed %}
   {% if not error %}
     <section class="fullbleed">
@@ -317,24 +318,40 @@
         <div class="card card-tight">
           <div class="section-head section-head--spaced">
             <div>
-              <h2 class="section-title">Finding Details</h2>
-              <p class="section-subtitle">Severity, rule, target and reason for each detected finding.</p>
+              <h2 class="section-title">Incident Details</h2>
+              <p class="section-subtitle">Severity, rule, target and reason for each detected incident.</p>
+            </div>
+          </div>
+
+          <div class="table-toolbar" id="findingsToolbar">
+            <div class="table-toolbar__left">
+              <label class="table-toolbar__label" for="findingsPageSize">Show</label>
+              <select id="findingsPageSize" class="table-toolbar__select">
+                <option value="10" selected>10</option>
+                <option value="20">20</option>
+                <option value="30">30</option>
+              </select>
+              <span class="table-toolbar__label">entries</span>
+            </div>
+            <div class="table-pagination" id="findingsPagination" hidden></div>
+            <div class="table-toolbar__right">
+              <span class="table-toolbar__meta" id="findingsTableMeta">Showing 0 to 0 of 0 Incidents</span>
             </div>
           </div>
 
           <div class="findings-scroll">
-            <table class="findings-table">
+            <table class="findings-table" id="findingDetailsTable">
               <thead>
                 <tr>
                   <th>Severity</th>
                   <th>Rule</th>
                   <th>Target (Flow / Activity)</th>
-                  <th>Error Detail</th>
+                  <th>Incident Detail</th>
                 </tr>
               </thead>
               <tbody>
                 {% for f in findings %}
-                  <tr>
+                  <tr class="finding-row">
                     <td>
                       <span class="severity-pill severity-pill--{{ f.severity_level }}">
                         Level {{ f.severity_level }}
@@ -351,14 +368,18 @@
                   </tr>
                 {% empty %}
                   <tr>
-                    <td colspan="4" class="empty-state-cell">No findings were detected with the current rule set.</td>
+                    <td colspan="4" class="empty-state-cell">No Incidents were detected with the current rule set.</td>
                   </tr>
                 {% endfor %}
               </tbody>
             </table>
           </div>
+
+          
         </div>
       </div>
     </section>
+
+    <script src="{% static 'analyzer/upload_analyzer.js' %}"></script>
   {% endif %}
 {% endblock %}
