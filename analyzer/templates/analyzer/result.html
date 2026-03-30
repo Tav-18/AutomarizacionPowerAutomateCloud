@@ -330,30 +330,35 @@
                   <th>Rule</th>
                   <th>Target (Flow / Activity)</th>
                   <th>Error Detail</th>
+                  <th>Suggestion</th>
                 </tr>
               </thead>
               <tbody>
-                {% for f in findings %}
-                  <tr>
-                    <td>
-                      <span class="severity-pill severity-pill--{{ f.severity_level }}">
-                        Level {{ f.severity_level }}
-                      </span>
-                    </td>
-                    <td>
-                      <div class="finding-rule">{{ f.rule_name }}</div>
-                    </td>
-                    <td class="cell-wrap">{{ f.target_pretty }}</td>
-                    <td>
-                      <div class="finding-label">Reason</div>
-                      <div class="finding-reason">{{ f.reason }}</div>
-                    </td>
-                  </tr>
-                {% empty %}
-                  <tr>
-                    <td colspan="4" class="empty-state-cell">No findings were detected with the current rule set.</td>
-                  </tr>
-                {% endfor %}
+{% for f in findings %}
+  <tr>
+    <td>
+      <span class="severity-pill severity-pill--{{ f.severity_level }}">
+        Level {{ f.severity_level }}
+      </span>
+    </td>
+    <td>
+      <div class="finding-rule">{{ f.rule_name }}</div>
+    </td>
+    <td class="cell-wrap">{{ f.target_pretty }}</td>
+    <td>
+      <div class="finding-label">Reason</div>
+      <div class="finding-reason">{{ f.reason }}</div>
+    </td>
+    <td class="cell-wrap">
+      <div class="finding-label">Suggestion</div>
+      <div class="finding-reason">{{ f.suggestion }}</div>
+    </td>
+  </tr>
+{% empty %}
+  <tr>
+    <td colspan="5" class="empty-state-cell">No findings were detected with the current rule set.</td>
+  </tr>
+{% endfor %}
               </tbody>
             </table>
           </div>

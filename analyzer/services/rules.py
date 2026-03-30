@@ -64,8 +64,6 @@ RUNAFTER_CONTROL_TYPES = {
 RUNAFTER_RELEVANT_ACTION_TYPES = {
     "http",
     "workflow",
-    "response",
-    "parsejson",
 }
 
 RUNAFTER_RELEVANT_OPERATION_IDS = {
@@ -118,6 +116,25 @@ PARAMETRIZABLE_HINTS = (
     "source", "drive",
     "blob", "container",
 )
+
+FLOW_NAME_RE = re.compile(r"^[A-Z][A-Za-z0-9_]*$")
+
+IO_PREFIX_RE = re.compile(
+    r"^(in_|out_|io_)(Bln|Int|Flt|Str|Obj|Arr)[A-Z][A-Za-z0-9]*$"
+)
+
+COMMENT_RELEVANT_TYPES = {
+    "scope",
+    "if",
+    "switch",
+    "foreach",
+    "http",
+    "openapiconnection",
+    "workflow",
+    "response",
+    "parsejson",
+}
+
 
 SYSTEM_VALUE_HINTS = (
     "schema.org",
@@ -664,31 +681,6 @@ def _should_check_runafter(action_name: str, action_raw: Dict[str, Any], base_pa
 
     return False
 
-def _is_integration_action(action_raw: Dict[str, Any]) -> bool:
-    """
-    Detecta acciones que sí vale la pena revisar con RunAfter
-    porque suelen implicar integración externa, conectores o llamadas.
-    """
-    action_type = str(action_raw.get("type", "") or "").strip().lower()
-
-    if action_type in {"http", "workflow", "openapiconnection", "apiconnection"}:
-        return True
-
-    inputs = action_raw.get("inputs")
-    if not isinstance(inputs, dict):
-        return False
-
-    host = inputs.get("host")
-    if isinstance(host, dict):
-        api_id = str(host.get("apiId", "") or "").strip()
-        connection_name = str(host.get("connectionName", "") or "").strip()
-        operation_id = str(host.get("operationId", "") or "").strip()
-
-        if api_id or connection_name or operation_id:
-            return True
-
-    return False
-
 
 def check_missing_runafter(
     flow_name: str,
@@ -854,6 +846,167 @@ def check_variable_naming(
     return findings
 
 
+def _collect_relevant_actions_recursive(actions_dict: Dict[str, Any], out: List[Tuple[str, Dict[str, Any], str]], base_path: str = "actions") -> None:
+    if not isinstance(actions_dict, dict):
+        return
+
+    for action_name, action_body in actions_dict.items():
+        if not isinstance(action_body, dict):
+            continue
+
+        current_path = f"{base_path}.{action_name}"
+        action_type = str(action_body.get("type", "") or "").strip().lower()
+
+        if action_type in COMMENT_RELEVANT_TYPES:
+            out.append((action_name, action_body, current_path))
+
+        nested_actions = action_body.get("actions")
+        if isinstance(nested_actions, dict) and nested_actions:
+            _collect_relevant_actions_recursive(nested_actions, out, f"{current_path}.actions")
+
+        else_block = action_body.get("else")
+        if isinstance(else_block, dict):
+            else_actions = else_block.get("actions")
+            if isinstance(else_actions, dict) and else_actions:
+                _collect_relevant_actions_recursive(else_actions, out, f"{current_path}.else.actions")
+
+        cases = action_body.get("cases")
+        if isinstance(cases, dict):
+            for case_name, case_body in cases.items():
+                if not isinstance(case_body, dict):
+                    continue
+                case_actions = case_body.get("actions")
+                if isinstance(case_actions, dict) and case_actions:
+                    _collect_relevant_actions_recursive(case_actions, out, f"{current_path}.cases.{case_name}.actions")
+
+        default_case = action_body.get("defaultCase")
+        if isinstance(default_case, dict):
+            default_actions = default_case.get("actions")
+            if isinstance(default_actions, dict) and default_actions:
+                _collect_relevant_actions_recursive(default_actions, out, f"{current_path}.defaultCase.actions")
+
+
+def _has_meaningful_description(action_raw: Dict[str, Any]) -> bool:
+    desc = str(action_raw.get("description", "") or "").strip()
+    if not desc:
+        return False
+
+    # evita contar placeholders vacíos o comentarios mínimos
+    noisy = {"n", "na", "n/a", ".", "-", "_"}
+    if desc.lower() in noisy:
+        return False
+
+    return len(desc) >= 8
+
+
+def _extract_trigger_and_response_names(flow_raw: Dict[str, Any]) -> List[Tuple[str, str, str]]:
+    """
+    Devuelve tuplas:
+    (kind, name_found, path)
+    kind = trigger_input | response_output
+    """
+    found: List[Tuple[str, str, str]] = []
+
+    definition = (
+        flow_raw.get("properties", {}).get("definition")
+        or flow_raw.get("definition")
+        or {}
+    )
+
+    # Trigger inputs
+    triggers = definition.get("triggers") or {}
+    for trigger_name, trigger_body in triggers.items():
+        if not isinstance(trigger_body, dict):
+            continue
+
+        schema = (trigger_body.get("inputs") or {}).get("schema") or {}
+        props = schema.get("properties") or {}
+
+        if isinstance(props, dict):
+            for prop_name, prop_body in props.items():
+                if not isinstance(prop_body, dict):
+                    continue
+
+                candidate = (
+                    str(prop_body.get("title", "") or "").strip()
+                    or str(prop_name or "").strip()
+                )
+                if candidate:
+                    found.append((
+                        "trigger_input",
+                        candidate,
+                        f"triggers.{trigger_name}.inputs.schema.properties.{prop_name}"
+                    ))
+
+    # Response outputs
+    actions = definition.get("actions") or {}
+    response_actions: List[Tuple[str, Dict[str, Any], str]] = []
+    _collect_relevant_actions_recursive(actions, response_actions)
+
+    for action_name, action_body, action_path in response_actions:
+        action_type = str(action_body.get("type", "") or "").strip().lower()
+        if action_type != "response":
+            continue
+
+        schema = (action_body.get("inputs") or {}).get("schema") or {}
+        props = schema.get("properties") or {}
+
+        if isinstance(props, dict):
+            for prop_name, prop_body in props.items():
+                if not isinstance(prop_body, dict):
+                    continue
+
+                candidate = (
+                    str(prop_body.get("title", "") or "").strip()
+                    or str(prop_name or "").strip()
+                )
+                if candidate:
+                    found.append((
+                        "response_output",
+                        candidate,
+                        f"{action_path}.inputs.schema.properties.{prop_name}"
+                    ))
+
+    return found
+
+
+def _flow_definition_actions(flow_raw: Dict[str, Any]) -> Dict[str, Any]:
+    definition = (
+        flow_raw.get("properties", {}).get("definition")
+        or flow_raw.get("definition")
+        or {}
+    )
+    return definition.get("actions") or {}
+
+def check_if_condition_structure(
+    flow_name: str,
+    action_name: str,
+    action_raw: Dict[str, Any],
+    base_path: str
+) -> List[Finding]:
+    findings: List[Finding] = []
+
+    action_type = str(action_raw.get("type", "") or "").strip().lower()
+    if action_type != "if":
+        return findings
+
+    then_actions = action_raw.get("actions")
+    if not isinstance(then_actions, dict) or not then_actions:
+        findings.append(Finding(
+            severity_level=1,
+            rule_name="Condición IF",
+            flow_name=flow_name,
+            action_name=action_name,
+            json_path=f"{base_path}.actions",
+            reason="La condición IF tiene la rama principal vacía o sin acciones útiles.",
+            evidence="Rama Then sin acciones.",
+            impact="Reduce legibilidad y puede ocultar una lógica mal estructurada o incompleta.",
+            fix="Agregar la lógica principal en la rama Then o replantear la estructura de la condición."
+        ))
+
+    return findings
+
+
 def run_all_rules(
     flow_name: str,
     action_name: str,
@@ -866,4 +1019,167 @@ def run_all_rules(
     findings += check_delay_usage(flow_name, action_name, action_raw, base_path)
     findings += check_action_naming_cloud(flow_name, action_name, base_path)
     findings += check_variable_naming(flow_name, action_name, action_raw, base_path)
+    findings += check_if_condition_structure(flow_name, action_name, action_raw, base_path)
+    return findings
+
+def check_flow_parameter_prefixes(flow_name: str, flow_raw: Dict[str, Any]) -> List[Finding]:
+    findings: List[Finding] = []
+
+    for kind, candidate_name, path in _extract_trigger_and_response_names(flow_raw):
+        normalized = candidate_name.strip()
+
+        if kind == "trigger_input":
+            if not normalized.startswith("in_"):
+                findings.append(Finding(
+                    severity_level=1,
+                    rule_name="Prefijos variables / parámetros",
+                    flow_name=flow_name,
+                    action_name="(flow)",
+                    json_path=path,
+                    reason="El parámetro de entrada no utiliza el prefijo esperado 'in_'.",
+                    evidence=f"Parámetro detectado: {normalized}",
+                    impact="Dificulta entender la dirección del dato entre flujos relacionados.",
+                    fix="Renombrar el parámetro usando el prefijo in_ seguido del tipo de dato y un nombre descriptivo."
+                ))
+                continue
+
+            if not IO_PREFIX_RE.match(normalized):
+                findings.append(Finding(
+                    severity_level=1,
+                    rule_name="Prefijos variables / parámetros",
+                    flow_name=flow_name,
+                    action_name="(flow)",
+                    json_path=path,
+                    reason="El parámetro de entrada no respeta la convención completa de prefijo, tipo y nombre descriptivo.",
+                    evidence=f"Parámetro detectado: {normalized}",
+                    impact="Reduce consistencia y dificulta entender el contrato entre flujos.",
+                    fix="Usar el formato in_ + tipo (Bln/Int/Flt/Str/Obj/Arr) + nombre descriptivo en UpperCamelCase."
+                ))
+                continue
+
+        elif kind == "response_output":
+            if not (normalized.startswith("out_") or normalized.startswith("io_")):
+                findings.append(Finding(
+                    severity_level=1,
+                    rule_name="Prefijos variables / parámetros",
+                    flow_name=flow_name,
+                    action_name="(flow)",
+                    json_path=path,
+                    reason="El parámetro de salida no utiliza el prefijo esperado 'out_' o 'io_'.",
+                    evidence=f"Parámetro detectado: {normalized}",
+                    impact="Complica el entendimiento de entradas y salidas entre flujos.",
+                    fix="Renombrar el parámetro usando out_ o io_ según corresponda, seguido del tipo y un nombre descriptivo."
+                ))
+                continue
+
+            if not IO_PREFIX_RE.match(normalized):
+                findings.append(Finding(
+                    severity_level=1,
+                    rule_name="Prefijos variables / parámetros",
+                    flow_name=flow_name,
+                    action_name="(flow)",
+                    json_path=path,
+                    reason="El parámetro de salida no respeta la convención completa de prefijo, tipo y nombre descriptivo.",
+                    evidence=f"Parámetro detectado: {normalized}",
+                    impact="Reduce consistencia y dificulta entender el contrato entre flujos.",
+                    fix="Usar el formato out_/io_ + tipo (Bln/Int/Flt/Str/Obj/Arr) + nombre descriptivo en UpperCamelCase."
+                ))
+                continue
+
+    return findings
+
+def check_flow_comments(flow_name: str, flow_raw: Dict[str, Any]) -> List[Finding]:
+    findings: List[Finding] = []
+
+    actions = _flow_definition_actions(flow_raw)
+    relevant_actions: List[Tuple[str, Dict[str, Any], str]] = []
+    _collect_relevant_actions_recursive(actions, relevant_actions)
+
+    if len(relevant_actions) < 3:
+        return findings
+
+    documented = 0
+    undocumented_examples: List[str] = []
+
+    for action_name, action_body, action_path in relevant_actions:
+        if _has_meaningful_description(action_body):
+            documented += 1
+        elif len(undocumented_examples) < 5:
+            undocumented_examples.append(action_name)
+
+    coverage = documented / len(relevant_actions)
+
+    if coverage < 0.33:
+        findings.append(Finding(
+            severity_level=1,
+            rule_name="Comentarios",
+            flow_name=flow_name,
+            action_name="(flow)",
+            json_path="actions",
+            reason=f"Solo {documented} de {len(relevant_actions)} acciones relevantes tienen descripción visible ({coverage:.0%}).",
+            evidence="Acciones sin descripción: " + ", ".join(undocumented_examples) if undocumented_examples else "Cobertura de comentarios insuficiente.",
+            impact="Dificulta entendimiento, mantenimiento y revisión del flujo.",
+            fix="Agregar descripciones visibles en acciones y ámbitos clave hasta alcanzar al menos 33% de cobertura."
+        ))
+
+    return findings
+
+def check_flow_naming(flow_name: str) -> List[Finding]:
+    findings: List[Finding] = []
+
+    base_name = str(flow_name or "").strip()
+
+    if not base_name:
+        return findings
+
+    if re.search(r"[áéíóúñÁÉÍÓÚÑ]", base_name):
+        findings.append(Finding(
+            severity_level=1,
+            rule_name="Nomenclatura de flujos",
+            flow_name=flow_name,
+            action_name="(flow)",
+            json_path="flow_name",
+            reason="El nombre del flujo contiene acentos o ñ.",
+            evidence=f"Nombre del flujo: {base_name}",
+            impact="Genera inconsistencia de nomenclatura dentro de la solución.",
+            fix="Renombrar el flujo usando solo ASCII, sin acentos ni caracteres especiales."
+        ))
+        return findings
+
+    if " " in base_name:
+        findings.append(Finding(
+            severity_level=1,
+            rule_name="Nomenclatura de flujos",
+            flow_name=flow_name,
+            action_name="(flow)",
+            json_path="flow_name",
+            reason="El nombre del flujo contiene espacios.",
+            evidence=f"Nombre del flujo: {base_name}",
+            impact="Reduce uniformidad y dificulta mantener una convención consistente.",
+            fix="Renombrar el flujo sin espacios y con una convención uniforme."
+        ))
+        return findings
+
+    # marcar solo si tiene caracteres especiales realmente problemáticos
+    if re.search(r"[^A-Za-z0-9_]", base_name):
+        findings.append(Finding(
+            severity_level=1,
+            rule_name="Nomenclatura de flujos",
+            flow_name=flow_name,
+            action_name="(flow)",
+            json_path="flow_name",
+            reason="El nombre del flujo contiene caracteres especiales no recomendados.",
+            evidence=f"Nombre del flujo: {base_name}",
+            impact="Dificulta mantener una convención clara y uniforme dentro de la solución.",
+            fix="Usar letras, números y guion bajo, evitando caracteres especiales innecesarios."
+        ))
+
+    return findings
+
+
+def run_flow_level_rules(flow_name: str, flow_raw: Dict[str, Any]) -> List[Finding]:
+    findings: List[Finding] = []
+    findings += check_flow_parameter_prefixes(flow_name, flow_raw)
+    findings += check_flow_naming(flow_name)
+    findings += check_flow_comments(flow_name, flow_raw)
     return findings

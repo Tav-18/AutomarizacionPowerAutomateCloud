@@ -16,8 +16,8 @@ from django.shortcuts import render, redirect
 from .forms import UploadSolutionZipForm
 from .services.zip_reader import save_upload, extract_zip, find_json_files
 from .services.flow_parser import parse_flow_json
-from .services.rules import run_all_rules, Finding
-from .services.excel_export import export_findings_to_xlsx
+from .services.rules import run_all_rules, run_flow_level_rules, Finding
+from .services.excel_export import export_findings_to_xlsx, map_rule
 
 
 
@@ -338,6 +338,10 @@ def select_jsons_view(request, pick_id: str):
                 run_all_rules(flow.flow_name, act.name, act.raw, act.json_path)
             )
 
+        findings.extend(
+            run_flow_level_rules(flow.flow_name, flow.raw)
+        )
+
     flagged_actions = {
         _action_key(f.flow_name, f.action_name)
         for f in findings
@@ -370,6 +374,9 @@ def select_jsons_view(request, pick_id: str):
             if action_part
             else flow_part
         )
+        
+        rule_meta = map_rule(item.get("rule_name", ""))
+        item["suggestion"] = rule_meta.get("suggestion", "")
 
     request.session[f"run:{run_id}"] = {
         "project_id": project_id,
@@ -382,134 +389,13 @@ def select_jsons_view(request, pick_id: str):
         "passed_actions_pct": passed_actions_pct,
     }
 
+    pick_dir = data.get("pick_dir")
+    if pick_dir:
+        shutil.rmtree(pick_dir, ignore_errors=True)
+
+    request.session.pop(f"pick:{pick_id}", None)
+
     return redirect("result", run_id=run_id)
-
-def select_jsons_view(request, pick_id: str):
-    data = request.session.get(f"pick:{pick_id}")
-    if not data:
-        return redirect("upload")
-
-    candidates = data.get("candidates", [])
-    project_id = (request.POST.get("project_id") or data.get("project_id", "")).strip()
-
-    if request.method == "POST":
-        selected_ids = request.POST.getlist("selected_jsons")
-
-        if not selected_ids:
-            return render(
-                request,
-                "analyzer/select_jsons.html",
-                {
-                    "pick_id": pick_id,
-                    "project_id": project_id,
-                    "json_candidates": candidates,
-                    "json_count": len(candidates),
-                    "error": "Select at least one JSON file to continue.",
-                },
-            )
-
-        candidate_map = {item["id"]: item for item in candidates}
-        selected_items = [candidate_map[item_id] for item_id in selected_ids if item_id in candidate_map]
-
-        if not selected_items:
-            return render(
-                request,
-                "analyzer/select_jsons.html",
-                {
-                    "pick_id": pick_id,
-                    "project_id": project_id,
-                    "json_candidates": candidates,
-                    "json_count": len(candidates),
-                    "error": "The selected JSON files are not valid anymore. Please upload the ZIP again.",
-                },
-            )
-
-        run_id = str(uuid.uuid4())
-        findings: list[Finding] = []
-        parsed_flows = []
-        total_actions = 0
-        total_json = len(selected_items)
-
-        for item in selected_items:
-            jf = item["full_path"]
-
-            flow = parse_flow_json(jf)
-            if not flow:
-                continue
-
-            parsed_flows.append(flow)
-            total_actions += len(flow.actions)
-
-            for act in flow.actions:
-                findings.extend(
-                    run_all_rules(flow.flow_name, act.name, act.raw, act.json_path)
-                )
-
-
-        flagged_actions = {
-            _action_key(f.flow_name, f.action_name)
-            for f in findings
-        }
-        flagged_actions_count = len(flagged_actions)
-        passed_actions_count = max(0, total_actions - flagged_actions_count)
-
-        passed_actions_pct = 0
-        if total_actions > 0:
-            passed_actions_pct = round((passed_actions_count / total_actions) * 100, 1)
-
-        findings_sorted = sorted(
-            findings,
-            key=lambda f: (
-                -f.severity_level,
-                f.rule_name.lower(),
-                f.flow_name.lower(),
-                f.action_name.lower(),
-            )
-        )
-
-        findings_dicts = [item.__dict__ for item in findings_sorted[:500]]
-
-        for item in findings_dicts:
-            flow_part = _flow_base(item.get("flow_name", ""))
-            action_part = _action_pretty(item.get("action_name", ""))
-
-            item["target_pretty"] = (
-                f"{flow_part} / {action_part}".strip(" /")
-                if action_part
-                else flow_part
-            )
-
-        request.session[f"run:{run_id}"] = {
-            "project_id": project_id,
-            "findings": findings_dicts,
-            "total_json": total_json,
-            "total_flows": len(parsed_flows),
-            "total_actions": total_actions,
-            "flagged_actions_count": flagged_actions_count,
-            "passed_actions_count": passed_actions_count,
-            "passed_actions_pct": passed_actions_pct,
-        }
-
-        # limpiar carpeta temporal + sesión del picker
-        pick_dir = data.get("pick_dir")
-        if pick_dir:
-            shutil.rmtree(pick_dir, ignore_errors=True)
-
-        request.session.pop(f"pick:{pick_id}", None)
-
-        return redirect("result", run_id=run_id)
-
-    return render(
-        request,
-        "analyzer/select_jsons.html",
-        {
-            "pick_id": pick_id,
-            "project_id": project_id,
-            "json_candidates": candidates,
-            "json_count": len(candidates),
-        },
-    )
-
 
 def result_view(request, run_id: str):
     data = request.session.get(f"run:{run_id}")

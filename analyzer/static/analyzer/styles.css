@@ -678,18 +678,24 @@ input[type="text"]:focus{
 .findings-table tbody tr:hover{ background:rgba(98,0,208,0.025); }
 
 .findings-table{
-  min-width:1080px;
+  min-width:1360px;
   table-layout:fixed;
 }
 
 .findings-table th:nth-child(1),
 .findings-table td:nth-child(1){ width:140px; }
+
 .findings-table th:nth-child(2),
-.findings-table td:nth-child(2){ width:260px; }
+.findings-table td:nth-child(2){ width:220px; }
+
 .findings-table th:nth-child(3),
-.findings-table td:nth-child(3){ width:320px; }
+.findings-table td:nth-child(3){ width:300px; }
+
 .findings-table th:nth-child(4),
-.findings-table td:nth-child(4){ width:auto; }
+.findings-table td:nth-child(4){ width:320px; }
+
+.findings-table th:nth-child(5),
+.findings-table td:nth-child(5){ width:380px; }
 
 .severity-pill{
   display:inline-flex;
