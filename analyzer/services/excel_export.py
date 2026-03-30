@@ -345,9 +345,9 @@ def build_azure_like_rows(findings: List[dict]) -> List[List[str]]:
     for _, item in grouped.items():
         rows.append([
             "",  # ID
-            "",  # State
+            "Active",  # State
             "",  # Tags
-            "",  # Work Item Type
+            "Code Review",  # Work Item Type
             item["title"],
             "\n".join(item["internal_paths"]),
             "\n".join(item["targets"]),
