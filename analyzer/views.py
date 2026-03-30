@@ -62,7 +62,7 @@ def _build_analysis_status(compliance_rate: float, total_findings: int) -> dict:
             "is_rejected": True,
         }
 
-    if compliance_rate >= 95:
+    if compliance_rate >= 90:
         return {
             "label": "Passed",
             "variant": "passed",
