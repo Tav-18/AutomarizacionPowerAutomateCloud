@@ -106,7 +106,7 @@ document.addEventListener("keydown", function (event) {
   }
 
   function updateMeta(startIndex, endIndex) {
-    meta.textContent = `Showing ${startIndex} to ${endIndex} of ${allRows.length} findings`;
+    meta.textContent = `Showing ${startIndex} to ${endIndex} of ${allRows.length} incidents`;
   }
 
   function createButton(label, onClick, options = {}) {
@@ -127,57 +127,80 @@ document.addEventListener("keydown", function (event) {
     return btn;
   }
 
-  function renderPagination() {
-    const totalPages = getTotalPages();
-    pagination.innerHTML = "";
+function renderPagination() {
+  const totalPages = getTotalPages();
+  pagination.innerHTML = "";
 
-    if (totalPages <= 1) {
-      pagination.hidden = true;
-      return;
-    }
-
-    pagination.hidden = false;
-
-    const prevBtn = createButton(
-      "Previous",
-      function () {
-        if (currentPage > 1) {
-          currentPage -= 1;
-          renderRows();
-        }
-      },
-      { disabled: currentPage === 1 }
-    );
-
-    pagination.appendChild(prevBtn);
-
-    for (let page = 1; page <= totalPages; page += 1) {
-      const pageBtn = createButton(
-        String(page),
-        function () {
-          currentPage = page;
-          renderRows();
-        },
-        { active: page === currentPage }
-      );
-
-      pagination.appendChild(pageBtn);
-    }
-
-    const nextBtn = createButton(
-      "Next",
-      function () {
-        if (currentPage < totalPages) {
-          currentPage += 1;
-          renderRows();
-        }
-      },
-      { disabled: currentPage === totalPages }
-    );
-
-    pagination.appendChild(nextBtn);
+  if (totalPages <= 1) {
+    pagination.hidden = true;
+    return;
   }
 
+  pagination.hidden = false;
+
+  const firstBtn = createButton(
+    "<<",
+    function () {
+      if (currentPage > 1) {
+        currentPage = 1;
+        renderRows();
+      }
+    },
+    { disabled: currentPage === 1 }
+  );
+  firstBtn.setAttribute("aria-label", "Go to first page");
+  firstBtn.title = "First page";
+
+  const prevBtn = createButton(
+    "<",
+    function () {
+      if (currentPage > 1) {
+        currentPage -= 1;
+        renderRows();
+      }
+    },
+    { disabled: currentPage === 1 }
+  );
+  prevBtn.setAttribute("aria-label", "Go to previous page");
+  prevBtn.title = "Previous page";
+
+  const pageIndicator = document.createElement("span");
+  pageIndicator.className = "table-page-indicator";
+  pageIndicator.textContent = String(currentPage);
+  pageIndicator.setAttribute("aria-label", `Current page ${currentPage} of ${totalPages}`);
+
+  const nextBtn = createButton(
+    ">",
+    function () {
+      if (currentPage < totalPages) {
+        currentPage += 1;
+        renderRows();
+      }
+    },
+    { disabled: currentPage === totalPages }
+  );
+  nextBtn.setAttribute("aria-label", "Go to next page");
+  nextBtn.title = "Next page";
+
+  const lastBtn = createButton(
+    ">>",
+    function () {
+      if (currentPage < totalPages) {
+        currentPage = totalPages;
+        renderRows();
+      }
+    },
+    { disabled: currentPage === totalPages }
+  );
+  lastBtn.setAttribute("aria-label", "Go to last page");
+  lastBtn.title = "Last page";
+
+  pagination.appendChild(firstBtn);
+  pagination.appendChild(prevBtn);
+  pagination.appendChild(pageIndicator);
+  pagination.appendChild(nextBtn);
+  pagination.appendChild(lastBtn);
+}
   function renderRows() {
     const totalPages = getTotalPages();
 
