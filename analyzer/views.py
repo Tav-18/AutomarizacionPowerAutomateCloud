@@ -62,7 +62,7 @@ def _build_analysis_status(compliance_rate: float, total_findings: int) -> dict:
             "is_rejected": True,
         }
 
-    if compliance_rate >= 90:
+    if compliance_rate >= 100:
         return {
             "label": "Passed",
             "variant": "passed",
@@ -84,7 +84,13 @@ def _build_compliance_core(compliance_rate: float, total_findings: int) -> dict:
         display_pct = 0
         theme = "rejected"
         tier = "Rejected"
-        helper = "This analysis was rejected because the total number of findings exceeded the allowed threshold."
+        helper = """
+        <ul class="status-helper-list">
+          <li>Due to the high number of incidents, the manual review is rejected.</li>
+          <li>A new date for the review is pending.</li>
+          <li>The leaders must be notified of the risk, and an incident with the highest impact must be raised.</li>
+        </ul>
+        """
         filled_segments = 0
     else:
         display_pct = pct
@@ -109,7 +115,6 @@ def _build_compliance_core(compliance_rate: float, total_findings: int) -> dict:
         filled_segments = max(0, min(20, math.floor(display_pct / 5)))
 
     segments = [{"filled": i < filled_segments} for i in range(20)]
-
     return {
         "theme": theme,
         "tier": tier,

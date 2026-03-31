@@ -50,10 +50,6 @@
       </div>
 
       <div class="core-body">
-<div class="core-readout">
-  <canvas id="pulse-canvas"></canvas>
-</div>
-
         <div
           class="core-bar"
           role="img"
@@ -65,7 +61,7 @@
         </div>
 
         <div class="core-meta">
-          <span class="core-helper">{{ compliance_helper }}</span>
+          <div class="core-helper">{{ compliance_helper|safe }}</div>
         </div>
       </div>
     </div>
@@ -313,75 +309,126 @@
 {% endblock %}
 {% block fullbleed %}
   {% if not error %}
-    <section class="fullbleed">
-      <div class="fullbleed-inner">
-        <div class="card card-tight">
-          <div class="section-head section-head--spaced">
-            <div>
-              <h2 class="section-title">Incident Details</h2>
-              <p class="section-subtitle">Severity, rule, target and reason for each detected incident.</p>
-            </div>
-          </div>
+<section class="fullbleed">
+  <div class="fullbleed-inner">
+    <div class="card card-tight">
 
-          <div class="table-toolbar" id="findingsToolbar">
-            <div class="table-toolbar__left">
-              <label class="table-toolbar__label" for="findingsPageSize">Show</label>
-              <select id="findingsPageSize" class="table-toolbar__select">
-                <option value="10" selected>10</option>
-                <option value="20">20</option>
-                <option value="30">30</option>
-              </select>
-              <span class="table-toolbar__label">entries</span>
-            </div>
-            <div class="table-pagination" id="findingsPagination" hidden></div>
-            <div class="table-toolbar__right">
-              <span class="table-toolbar__meta" id="findingsTableMeta">Showing 0 to 0 of 0 Incidents</span>
-            </div>
-          </div>
-
-          <div class="findings-scroll">
-            <table class="findings-table" id="findingDetailsTable">
-              <thead>
-                <tr>
-                  <th>Severity</th>
-                  <th>Rule</th>
-                  <th>Target (Flow / Activity)</th>
-                  <th>Error Detail</th>
-                  <th>Suggestion</th>
-                </tr>
-              </thead>
-              <tbody>
-{% for f in findings %}
-  <tr>
-    <td>
-      <span class="severity-pill severity-pill--{{ f.severity_level }}">
-        Level {{ f.severity_level }}
-      </span>
-    </td>
-    <td>
-      <div class="finding-rule">{{ f.rule_name }}</div>
-    </td>
-    <td class="cell-wrap">{{ f.target_pretty }}</td>
-    <td>
-      <div class="finding-reason">{{ f.reason }}</div>
-    </td>
-    <td class="cell-wrap">
-      <div class="finding-reason">{{ f.suggestion }}</div>
-    </td>
-  </tr>
-{% empty %}
-  <tr>
-    <td colspan="5" class="empty-state-cell">No findings were detected with the current rule set.</td>
-  </tr>
-{% endfor %}
-              </tbody>
-            </table>
-          </div>
-
-          
+      <div class="section-head section-head--spaced">
+        <div>
+          <h2 class="section-title">Incident Details</h2>
+          <p class="section-subtitle">Severity, rule, target and reason for each detected incident.</p>
+        </div>
+        <!-- buscador global alineado a la derecha del título -->
+        <div class="findings-search-wrap">
+          <svg class="findings-search-icon" viewBox="0 0 20 20" fill="none">
+            <circle cx="8.5" cy="8.5" r="5.5" stroke="currentColor" stroke-width="1.8"/>
+            <path d="M13 13l3.5 3.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+          </svg>
+          <input
+            id="findingsSearch"
+            class="findings-search"
+            type="text"
+            placeholder="Search all columns…"
+            autocomplete="off"
+            aria-label="Search incidents"
+          />
+          <button class="findings-search-clear" id="findingsSearchClear" hidden aria-label="Clear search">×</button>
         </div>
       </div>
-    </section>
+
+      <!-- chips de filtros activos -->
+      <div class="findings-active-filters" id="findingsActiveFilters" hidden></div>
+
+
+      <div class="findings-scroll">
+        <table class="findings-table" id="findingDetailsTable">
+          <thead>
+            <tr>
+              <!-- cada th con data-col para identificar la columna filtrable -->
+              <th>
+                <div class="th-inner">
+                  Severity
+                  <button class="col-filter-btn" data-col="severity" aria-label="Filter by severity">
+                    <svg viewBox="0 0 16 16" fill="none" width="13" height="13">
+                      <path d="M2 4h12M4 8h8M6 12h4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+                    </svg>
+                  </button>
+                  <div class="col-filter-dropdown" id="colFilter-severity" hidden>
+                    <div class="col-filter-dropdown__inner">
+                      <p class="col-filter-dropdown__label">Filter by severity</p>
+                      <div class="col-filter-options" id="colOpts-severity"></div>
+                      <button class="col-filter-clear" data-col="severity">Clear</button>
+                    </div>
+                  </div>
+                </div>
+              </th>
+              <th>
+                <div class="th-inner">
+                  Rule
+                  <button class="col-filter-btn" data-col="rule" aria-label="Filter by rule">
+                    <svg viewBox="0 0 16 16" fill="none" width="13" height="13">
+                      <path d="M2 4h12M4 8h8M6 12h4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+                    </svg>
+                  </button>
+                  <div class="col-filter-dropdown" id="colFilter-rule" hidden>
+                    <div class="col-filter-dropdown__inner">
+                      <p class="col-filter-dropdown__label">Filter by rule</p>
+                      <div class="col-filter-options" id="colOpts-rule"></div>
+                      <button class="col-filter-clear" data-col="rule">Clear</button>
+                    </div>
+                  </div>
+                </div>
+              </th>
+              <th>Target (Flow / Activity)</th>
+              <th>Error Detail</th>
+              <th>Suggestion</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for f in findings %}
+              <tr
+                data-severity="{{ f.severity_level }}"
+                data-rule="{{ f.rule_name }}"
+              >
+                <td>
+                  <span class="severity-pill severity-pill--{{ f.severity_level }}">
+                    Level {{ f.severity_level }}
+                  </span>
+                </td>
+                <td><div class="finding-rule">{{ f.rule_name }}</div></td>
+                <td class="cell-wrap">{{ f.target_pretty }}</td>
+                <td><div class="finding-reason">{{ f.reason }}</div></td>
+                <td class="cell-wrap"><div class="finding-reason">{{ f.suggestion }}</div></td>
+              </tr>
+            {% empty %}
+              <tr>
+                <td colspan="5" class="empty-state-cell">No findings were detected with the current rule set.</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+
+
+      <div class="table-toolbar" id="findingsToolbar">
+        <div class="table-toolbar__left">
+          <label class="table-toolbar__label" for="findingsPageSize">Show</label>
+          <select id="findingsPageSize" class="table-toolbar__select">
+            <option value="10" selected>10</option>
+            <option value="20">20</option>
+            <option value="30">30</option>
+          </select>
+          <span class="table-toolbar__label">entries</span>
+        </div>
+        <div class="table-pagination" id="findingsPagination" hidden></div>
+        <div class="table-toolbar__right">
+          <span class="table-toolbar__meta" id="findingsTableMeta">Showing 0 to 0 of 0 Incidents</span>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</section>
 
     <script src="{% static 'analyzer/upload_analyzer.js' %}"></script>
   {% endif %}
