@@ -69,6 +69,21 @@ RULE_DISPLAY_ORDER = {
 def _rule_order(rule_name: str) -> int:
     return RULE_DISPLAY_ORDER.get(rule_name or "", 999)
 
+RULE_SEVERITY_ORDER = {
+    "Hardcode": 3,
+    "Parametrizable": 2,
+    "Manejo de errores (RunAfter)": 2,
+    "Retrasos (Delay y Wait)": 2,
+    "Nomenclatura de actividades": 1,
+    "Nomenclatura de variables": 1,
+    "Nomenclatura de flujos": 1,
+    "Prefijos variables / parámetros": 1,
+    "Condición IF": 1,
+    "Comentarios descriptivos": 1,
+}
+
+def _rule_severity(rule_name: str) -> int:
+    return RULE_SEVERITY_ORDER.get(rule_name or "", 0)
 
 def _build_analysis_status(compliance_rate: float, total_findings: int) -> dict:
     if total_findings > 100:
@@ -430,9 +445,14 @@ def result_view(request, run_id: str):
     findings = data.get("findings", [])
     counts = Counter([(f.get("rule_name") or "Unknown") for f in findings])
     rule_rows = sorted(
-    counts.items(),
-    key=lambda item: (_rule_order(item[0]), item[0].lower())
-)
+        counts.items(),
+        key=lambda item: (
+            -_rule_severity(item[0]),
+            -item[1],
+            _rule_order(item[0]),
+            item[0].lower(),
+        )
+    )
     passed_actions_pct = _safe_pct(data.get("passed_actions_pct", 0))
     total_findings = len(findings)
 
