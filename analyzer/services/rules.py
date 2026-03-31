@@ -46,7 +46,20 @@ WINDOWS_PATH_RE = re.compile(r"^[A-Za-z]:\\")
 UNIX_PATH_RE = re.compile(r"^/(?!/).+")
 VARIABLE_NAME_RE = re.compile(r"^(Bln|Int|Flt|Str|Obj|Arr)[A-Z][A-Za-z0-9]*$")
 
-CURP_RE = re.compile(r"^[A-Z]{4}\d{6}[HM][A-Z]{5}[A-Z0-9]\d$", re.IGNORECASE)
+CURP_RE = re.compile(r"^"
+    r"[A-Z][AEIOUX][A-Z]{2}"
+    r"\d{2}(0[1-9]|1[0-2])"
+    r"(0[1-9]|[12]\d|3[01])"
+    r"[HM]"
+    r"(AS|BC|BS|CC|CL|CM|CS|CH|DF|DG|GT|GR|HG|JC|MC|MN|MS|"
+    r"NT|NL|OC|PL|QT|QR|SP|SL|SR|TC|TS|TL|VZ|YN|ZS|NE)"
+    r"[B-DF-HJ-NP-TV-Z]{3}"
+    r"[A-Z0-9]"
+    r"\d"
+    r"$",
+    re.IGNORECASE
+)
+
 RFC_RE = re.compile(r"^[A-ZÑ&]{3,4}\d{6}[A-Z0-9]{3}$", re.IGNORECASE)
 PHONE_RE = re.compile(r"^\+?\d{10,15}$")
 GUID_RE = re.compile(
