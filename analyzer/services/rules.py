@@ -63,7 +63,7 @@ CURP_RE = re.compile(
 )
 
 RFC_RE = re.compile(r"^[A-ZÑ&]{3,4}\d{6}[A-Z0-9]{3}$", re.IGNORECASE)
-PHONE_RE = re.compile(r"^\+?\d{10,15}$")
+PHONE_RE = re.compile(r"^\+?\d{12}$")
 GUID_RE = re.compile(
     r"^[{(]?[0-9a-fA-F]{8}[-]?[0-9a-fA-F]{4}[-]?[0-9a-fA-F]{4}[-]?[0-9a-fA-F]{4}[-]?[0-9a-fA-F]{12}[)}]?$"
 )
