@@ -1,6 +1,7 @@
 import re
 from dataclasses import dataclass
 from typing import Any, Dict, List, Tuple
+import unicodedata
 
 
 # =========================
@@ -224,6 +225,145 @@ def _leaf_path_name(path: str) -> str:
     leaf = re.sub(r"\[\d+\]$", "", leaf)
     return leaf.lower().strip()
 
+GENERIC_SCHEMA_VALUES = {
+    "string", "object", "array", "integer", "number", "boolean", "null"
+}
+
+PII_FIELD_ALIASES = {
+    "email": {
+        "correo", "correoelectronico", "email", "mail"
+    },
+    "curp": {
+        "curp"
+    },
+    "rfc": {
+        "rfc"
+    },
+    "phone": {
+        "telefono", "celular", "phone", "mobile"
+    },
+    "nss": {
+        "numerodeseguridadsocial", "nss", "imss"
+    },
+    "birthdate": {
+        "fechanacimiento", "fecha_nacimiento", "birthdate", "dateofbirth"
+    },
+}
+
+SENSITIVE_FIELD_HINTS_N = {
+    "password", "passwd", "pwd",
+    "secret", "token",
+    "apikey", "clientsecret",
+    "privatekey", "authorization",
+    "accesskey", "connectionstring",
+    "recipient", "recipients",
+    "to", "cc", "bcc",
+}
+
+PARAM_FIELD_ALIASES = {
+    "url", "uri", "endpoint",
+    "path", "route", "ruta",
+    "folder", "directory", "carpeta", "directorio",
+    "file", "filename", "archivo", "nombrearchivo",
+    "template", "plantilla",
+    "host", "hostname", "servidor",
+    "baseurl", "siteaddress", "sitio",
+    "dataset", "table", "tabla",
+    "source", "drive",
+    "blob", "container", "contenedor",
+}
+
+def _strip_accents(text: str) -> str:
+    text = text or ""
+    return "".join(
+        ch for ch in unicodedata.normalize("NFD", text)
+        if unicodedata.category(ch) != "Mn"
+    )
+
+def _normalize_compare_key(text: str) -> str:
+    s = _strip_accents(text).lower().strip()
+    return re.sub(r"[^a-z0-9]", "", s)
+
+def _normalize_field_name(name: str) -> str:
+    """
+    Normaliza nombres de campos para detectar variantes como:
+    cur_p, cur-p, CURP_1, correo-electronico, telefono2, etc.
+    """
+    s = _strip_accents(name).lower().strip()
+
+    # quita sufijos numéricos al final: curp2, curp_2, telefono-1
+    s = re.sub(r"[\W_]*\d+$", "", s)
+
+    # deja solo letras y números
+    s = re.sub(r"[^a-z0-9]", "", s)
+    return s
+
+def _normalize_default_action_name(name: str) -> str:
+    """
+    Convierte:
+    Apply to each -> Apply_to_each
+    Delay-2       -> Delay_2
+    """
+    s = _strip_accents(name or "").strip()
+    s = re.sub(r"[\s\-]+", "_", s)
+    s = re.sub(r"_+", "_", s)
+    return s
+
+def _normalized_leaf_and_parent(path: str) -> tuple[str, str]:
+    leaf = _normalize_field_name(_leaf_path_name(path))
+    parent = _normalize_field_name(_parent_path_name(path))
+    return leaf, parent
+
+def _pii_kind_from_path(path: str, action_raw: Dict[str, Any] | None = None) -> str | None:
+    candidates = _candidate_field_names(path, action_raw)
+
+    for kind, aliases in PII_FIELD_ALIASES.items():
+        if candidates & aliases:
+            return kind
+
+    return None
+
+def _has_sensitive_hint(path: str, action_raw: Dict[str, Any] | None = None) -> bool:
+    candidates = _candidate_field_names(path, action_raw)
+    return bool(candidates & SENSITIVE_FIELD_HINTS_N)
+
+def _has_param_hint(path: str, action_raw: Dict[str, Any] | None = None) -> bool:
+    candidates = _candidate_field_names(path, action_raw)
+    return bool(candidates & PARAM_FIELD_ALIASES)
+
+def _matches_pii_by_field_hint(path: str, value: str, action_raw: Dict[str, Any] | None = None) -> bool:
+    value = (value or "").strip()
+    if not value:
+        return False
+
+    if value.lower() in GENERIC_SCHEMA_VALUES:
+        return False
+
+    kind = _pii_kind_from_path(path, action_raw)
+    if not kind:
+        return False
+
+    if kind == "email":
+        return EMAIL_RE.fullmatch(value) is not None
+
+    if kind == "curp":
+        return CURP_RE.fullmatch(value) is not None
+
+    if kind == "rfc":
+        return RFC_RE.fullmatch(value) is not None
+
+    if kind == "phone":
+        normalized = re.sub(r"[^\d+]", "", value)
+        return PHONE_RE.fullmatch(normalized) is not None
+
+    if kind == "nss":
+        normalized = re.sub(r"\D", "", value)
+        return len(normalized) in {10, 11}
+
+    if kind == "birthdate":
+        return bool(re.fullmatch(r"\d{4}-\d{2}-\d{2}", value))
+
+    return False
 
 def _parent_path_name(path: str) -> str:
     if not path:
@@ -317,7 +457,7 @@ def _extract_initialized_variable_names(
     return _dedupe_pairs(found)
 
 
-def _looks_sensitive_literal(path: str, value: str) -> bool:
+def _looks_sensitive_literal(path: str, value: str, action_raw: Dict[str, Any] | None = None) -> bool:
     value = (value or "").strip()
     path_low = (path or "").lower()
 
@@ -333,42 +473,19 @@ def _looks_sensitive_literal(path: str, value: str) -> bool:
     if _is_connector_plumbing_path(path):
         return False
 
-    leaf = _leaf_path_name(path)
-    parent = _parent_path_name(path)
+    leaf, _ = _normalized_leaf_and_parent(path)
 
-    # excluir textos operativos muy comunes
     non_sensitive_literals = {
-        "ok",
-        "na",
-        "n/a",
-        "exception",
-        "true",
-        "false",
-        "null",
-        "string",
-        "object",
-        "array",
-        "integer",
-        "number",
-        "boolean",
-        "bearer_token",
-        "client_credential",
-        "default",
-        "prod",
-        "post",
-        "get",
+        "ok", "na", "n/a", "exception", "true", "false", "null",
+        "string", "object", "array", "integer", "number", "boolean",
+        "bearer_token", "client_credential", "default", "prod", "post", "get",
     }
 
     if value.lower() in non_sensitive_literals:
         return False
 
-    # excluir paths de mensajes/respuestas
     non_sensitive_path_tokens = (
-        ".message",
-        ".status",
-        ".reentry",
-        ".authenticationmethod",
-        ".granttype",
+        ".message", ".status", ".reentry", ".authenticationmethod", ".granttype",
     )
     if any(token in path_low for token in non_sensitive_path_tokens):
         return False
@@ -376,24 +493,23 @@ def _looks_sensitive_literal(path: str, value: str) -> bool:
     if leaf == "name":
         return False
 
-    if EMAIL_RE.search(value):
+    if EMAIL_RE.fullmatch(value):
         return True
 
-    if leaf in SENSITIVE_FIELD_HINTS or parent in SENSITIVE_FIELD_HINTS:
+    if _pii_kind_from_path(path, action_raw):
+        return _matches_pii_by_field_hint(path, value, action_raw)
+
+    if _has_sensitive_hint(path, action_raw):
         return True
 
-    if leaf in PII_FIELD_HINTS or parent in PII_FIELD_HINTS:
-        if value.lower() in {"string", "object", "array", "integer", "number", "boolean", "null"}:
-            return False
+    if CURP_RE.fullmatch(value):
         return True
 
-    if CURP_RE.match(value):
+    if RFC_RE.fullmatch(value):
         return True
 
-    if RFC_RE.match(value):
-        return True
-
-    if PHONE_RE.match(re.sub(r"[^\d+]", "", value)):
+    normalized_phone = re.sub(r"[^\d+]", "", value)
+    if PHONE_RE.fullmatch(normalized_phone):
         return True
 
     if _classify_sensitivity(value):
@@ -447,10 +563,9 @@ def _is_child_flow_path(path: str) -> bool:
 
     return any(token in path_low for token in child_flow_tokens)
 
-def _looks_parametrizable_literal(path: str, value: str) -> bool:
+def _looks_parametrizable_literal(path: str, value: str, action_raw: Dict[str, Any] | None = None) -> bool:
     value = (value or "").strip()
     path_low = (path or "").lower()
-    leaf = _leaf_path_name(path)
 
     if not value:
         return False
@@ -473,27 +588,17 @@ def _looks_parametrizable_literal(path: str, value: str) -> bool:
     if _classify_sensitivity(value):
         return False
 
-    if CURP_RE.match(value) or RFC_RE.match(value):
+    if CURP_RE.fullmatch(value) or RFC_RE.fullmatch(value):
         return False
 
-    if leaf in PII_FIELD_HINTS:
+    if _pii_kind_from_path(path, action_raw):
         return False
 
-    # excluir nombres/refs de workflows
-    workflow_tokens = (
-        "workflowreferencename",
-        "childflow",
-        "run a child flow",
-    )
-    if any(token in path_low for token in workflow_tokens):
+    if _has_sensitive_hint(path, action_raw):
         return False
 
-    field_looks_configurable = any(token in leaf for token in PARAMETRIZABLE_HINTS)
+    field_looks_configurable = _has_param_hint(path, action_raw)
 
-    if not field_looks_configurable:
-        field_looks_configurable = any(f".{token}" in path_low for token in PARAMETRIZABLE_HINTS)
-
-    # permitir explícitamente rutas de archivo/tabla/drive aunque no entren por hints
     if not field_looks_configurable:
         explicit_param_tokens = (
             ".inputs.parameters.file",
@@ -518,7 +623,7 @@ def _looks_parametrizable_literal(path: str, value: str) -> bool:
     if "sharepoint.com" in low_value or "blob.core.windows.net" in low_value:
         return True
 
-    if GUID_RE.match(value):
+    if GUID_RE.fullmatch(value):
         return True
 
     if ("/" in value or "\\" in value or "." in value) and len(value) > 3:
@@ -526,9 +631,6 @@ def _looks_parametrizable_literal(path: str, value: str) -> bool:
 
     return False
 
-# =========================
-# Rules (Action level)
-# =========================
 
 def check_hardcode_and_parametrizable(
     flow_name: str,
@@ -560,11 +662,11 @@ def check_hardcode_and_parametrizable(
         if not value:
             continue
 
-        if _looks_sensitive_literal(path, value):
+        if _looks_sensitive_literal(path, value, action_raw):
             hardcode_hits.append((path, value))
             continue
 
-        if _looks_parametrizable_literal(path, value):
+        if _looks_parametrizable_literal(path, value, action_raw):
             parametrizable_hits.append((path, value))
 
     # Consolidar Hardcode a una sola incidencia por actividad
@@ -658,36 +760,44 @@ def _is_nested_control_path(base_path: str) -> bool:
     ))
 
 def _should_check_runafter(action_name: str, action_raw: Dict[str, Any], base_path: str) -> bool:
-    action_type = str(action_raw.get("type", "") or "").strip().lower()
-    action_name_low = (action_name or "").strip().lower()
-    operation_id = _get_operation_id(action_raw)
+    action_type = _normalize_compare_key(str(action_raw.get("type", "") or ""))
+    action_name_key = _normalize_compare_key(action_name or "")
+    operation_id = _normalize_compare_key(_get_operation_id(action_raw))
 
-    if action_type in RUNAFTER_CONTROL_TYPES:
+    runafter_control_types = {"if", "switch", "scope", "foreach", "until"}
+    control_name_hints = {"condition", "if", "switch", "scope", "applytoeach", "foreach", "until"}
+    runafter_relevant_types = {"http", "workflow"}
+    runafter_relevant_ops = {
+        "getfileitems",
+        "getitem",
+        "getitems",
+        "getrow",
+        "getrows",
+        "getfilemetadata",
+        "getfilemetadatausingpath",
+    }
+    runafter_excluded_ops = {
+        "createfile",
+        "updatefile",
+        "createfileitem",
+    }
+
+    if action_type in runafter_control_types:
         return False
 
-    control_name_hints = (
-        "condition",
-        "if",
-        "switch",
-        "scope",
-        "apply_to_each",
-        "foreach",
-        "until",
-    )
-
-    if action_name_low in control_name_hints:
+    if action_name_key in control_name_hints:
         return False
 
-    if any(action_name_low.startswith(hint) for hint in control_name_hints):
+    if any(action_name_key.startswith(hint) for hint in control_name_hints):
         return False
 
-    if operation_id in RUNAFTER_EXCLUDED_OPERATION_IDS:
+    if operation_id in runafter_excluded_ops:
         return False
 
-    if action_type in RUNAFTER_RELEVANT_ACTION_TYPES:
+    if action_type in runafter_relevant_types:
         return True
 
-    if operation_id in RUNAFTER_RELEVANT_OPERATION_IDS:
+    if operation_id in runafter_relevant_ops:
         return True
 
     return False
@@ -727,12 +837,14 @@ def check_delay_usage(
 ) -> List[Finding]:
     findings: List[Finding] = []
 
-    action_type = str(action_raw.get("type", "") or "").lower()
-    action_name_low = (action_name or "").lower()
+    action_type = _normalize_compare_key(str(action_raw.get("type", "") or ""))
+    action_name_key = _normalize_compare_key(action_name or "")
 
     is_delay_action = (
-        DELAY_NAME_RE.search(action_name_low) is not None
-        or action_type in ("delay", "wait")
+        action_type in {"delay", "wait"}
+        or action_name_key in {"delay", "wait"}
+        or action_name_key.startswith("delay")
+        or action_name_key.startswith("wait")
     )
 
     if not is_delay_action:
@@ -785,25 +897,13 @@ def check_action_naming_cloud(
 ) -> List[Finding]:
     findings: List[Finding] = []
 
-    if NAMING_ALLOWLIST_RE.match(action_name):
+    allowlist_key = _normalize_compare_key(action_name)
+    if allowlist_key in {"whenahttprequestisreceived", "recurrence"}:
         return findings
 
-    if "_-_" in action_name or "-" in action_name:
-        if re.search(r"[áéíóúñÁÉÍÓÚÑ]", action_name):
-            findings.append(Finding(
-                severity_level=1,
-                rule_name="Nomenclatura de actividades",
-                flow_name=flow_name,
-                action_name=action_name,
-                json_path=base_path,
-                reason="El nombre contiene acentos o ñ; se recomienda solo ASCII para consistencia.",
-                evidence=f"Nombre: {action_name}",
-                impact="Inconsistencia de estandarización y posibles diferencias entre equipos o entornos.",
-                fix="Renombrar usando ASCII sin acentos ni caracteres especiales."
-            ))
-        return findings
+    default_name_key = _normalize_default_action_name(action_name)
 
-    if DEFAULT_ACTION_NAME_RE.match(action_name):
+    if DEFAULT_ACTION_NAME_RE.match(default_name_key):
         findings.append(Finding(
             severity_level=1,
             rule_name="Nomenclatura de actividades",
@@ -856,19 +956,71 @@ def check_variable_naming(
 
     return findings
 
+def _extract_context_names_for_value_path(path: str, action_raw: Dict[str, Any]) -> set[str]:
+    names: set[str] = set()
+
+    raw_inputs = action_raw.get("inputs")
+    if not isinstance(raw_inputs, dict):
+        return names
+
+    inputs = raw_inputs
+
+    # Caso SetVariable / similares: inputs.value + inputs.name
+    if path.endswith(".inputs.value"):
+        for key in ("name", "variableName", "variable", "nombre"):
+            v = inputs.get(key)
+            if isinstance(v, str) and v.strip():
+                names.add(_normalize_field_name(v))
+
+    # Caso InitializeVariable: inputs.variables[i].value -> usar inputs.variables[i].name
+    m = re.search(r"\.inputs\.variables\[(\d+)\]\.value$", path)
+    if m:
+        idx = int(m.group(1))
+        variables = inputs.get("variables")
+        if isinstance(variables, list) and 0 <= idx < len(variables):
+            item = variables[idx]
+            if isinstance(item, dict):
+                v = item.get("name")
+                if isinstance(v, str) and v.strip():
+                    names.add(_normalize_field_name(v))
+
+    return names
+
+
+def _candidate_field_names(path: str, action_raw: Dict[str, Any] | None = None) -> set[str]:
+    leaf, parent = _normalized_leaf_and_parent(path)
+    candidates = {leaf, parent}
+
+    if action_raw is not None:
+        candidates |= _extract_context_names_for_value_path(path, action_raw)
+
+    return {x for x in candidates if x}
+
 
 def _collect_relevant_actions_recursive(actions_dict: Dict[str, Any], out: List[Tuple[str, Dict[str, Any], str]], base_path: str = "actions") -> None:
     if not isinstance(actions_dict, dict):
         return
+
+    relevant_types = {
+        "scope",
+        "if",
+        "switch",
+        "foreach",
+        "http",
+        "openapiconnection",
+        "workflow",
+        "response",
+        "parsejson",
+    }
 
     for action_name, action_body in actions_dict.items():
         if not isinstance(action_body, dict):
             continue
 
         current_path = f"{base_path}.{action_name}"
-        action_type = str(action_body.get("type", "") or "").strip().lower()
+        action_type = _normalize_compare_key(str(action_body.get("type", "") or ""))
 
-        if action_type in COMMENT_RELEVANT_TYPES:
+        if action_type in relevant_types:
             out.append((action_name, action_body, current_path))
 
         nested_actions = action_body.get("actions")
@@ -955,7 +1107,7 @@ def _extract_trigger_and_response_names(flow_raw: Dict[str, Any]) -> List[Tuple[
     _collect_relevant_actions_recursive(actions, response_actions)
 
     for action_name, action_body, action_path in response_actions:
-        action_type = str(action_body.get("type", "") or "").strip().lower()
+        action_type = _normalize_compare_key(str(action_body.get("type", "") or ""))
         if action_type != "response":
             continue
 
@@ -997,7 +1149,7 @@ def check_if_condition_structure(
 ) -> List[Finding]:
     findings: List[Finding] = []
 
-    action_type = str(action_raw.get("type", "") or "").strip().lower()
+    action_type = _normalize_compare_key(str(action_raw.get("type", "") or ""))
     if action_type != "if":
         return findings
 
