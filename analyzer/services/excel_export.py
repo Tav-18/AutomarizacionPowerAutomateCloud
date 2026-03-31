@@ -167,7 +167,7 @@ RULE_CATALOG: Dict[str, Dict[str, object]] = {
             "Configurar RunAfter para estados failed, timedOut o canceled y agregar manejo controlado."
         ),
     },
-    "Retrasos": {
+    "Retrasos (Delay y Wait)": {
         "impact_area": "E - Retrasos",
         "title": "Retrasos",
         "suggestion_es": (
@@ -203,7 +203,7 @@ RULE_CATALOG: Dict[str, Dict[str, object]] = {
             "Revisar la estructura de la condición para que la rama verdadera contenga la lógica principal y sea legible."
         ),
     },
-    "Comentarios": {
+    "Comentarios descriptivos": {
         "impact_area": "M - Descripciones",
         "title": "Descripciones",
         "suggestion_es": (

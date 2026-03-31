@@ -723,19 +723,22 @@ input[type="text"]:focus{
 }
 
 .findings-table th:nth-child(1),
-.findings-table td:nth-child(1){ width:110px; }
+.findings-table td:nth-child(1){ width:140px; }
 
 .findings-table th:nth-child(2),
-.findings-table td:nth-child(2){ width:160px; }
+.findings-table td:nth-child(2){ width:220px; }
 
 .findings-table th:nth-child(3),
-.findings-table td:nth-child(3){ width:260px; }
+.findings-table td:nth-child(3){ width:300px; }
 
 .findings-table th:nth-child(4),
-.findings-table td:nth-child(4){ width:290px; }
+.findings-table td:nth-child(4){ width:360px; }
 
 .findings-table th:nth-child(5),
-.findings-table td:nth-child(5){ width:340px; }
+.findings-table td:nth-child(5){ width:320px; }
+
+.findings-table th:nth-child(6),
+.findings-table td:nth-child(6){ width:100px; text-align:center; }
 .severity-pill{
   display:inline-flex;
   align-items:center;

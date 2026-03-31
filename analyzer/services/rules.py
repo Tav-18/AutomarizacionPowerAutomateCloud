@@ -167,6 +167,7 @@ class Finding:
     evidence: str
     impact: str
     fix: str
+    repeat_count: int = 1
 
 
 # =========================
@@ -571,10 +572,7 @@ def check_hardcode_and_parametrizable(
             flow_name=flow_name,
             action_name=action_name,
             json_path=base_path,
-            reason=(
-                f"Se detectaron {total_hits} valores sensibles hardcodeados "
-                f"dentro de la misma actividad."
-            ),
+            reason= "Se detectaron valores sensibles hardcodeados dentro de la misma actividad",
             evidence=" | ".join(sample_paths),
             impact=(
                 "Riesgo de exposición de correos, credenciales, tokens o información "
@@ -584,7 +582,8 @@ def check_hardcode_and_parametrizable(
                 "Mover estos valores a un mecanismo seguro "
                 "(por ejemplo Key Vault, connection reference o variable de entorno protegida) "
                 "y resolverlos dinámicamente."
-            )
+            ),
+            repeat_count=total_hits,
         ))
 
     # Consolidar Parametrizable a una sola incidencia por actividad
@@ -606,16 +605,14 @@ def check_hardcode_and_parametrizable(
             flow_name=flow_name,
             action_name=action_name,
             json_path=base_path,
-            reason=(
-                f"Se detectaron {total_hits} valores fijos no sensibles que "
-                f"deberían parametrizarse dentro de la misma actividad."
-            ),
+            reason= "Se detectaron valores fijos no sensibles que deberían parametrizarse dentro de la misma actividad.",
             evidence=" | ".join(sample_paths),
             impact="Complica promoción entre ambientes, mantenimiento y cambios futuros.",
             fix=(
                 "Mover estos valores a un mecanismo parametrizable "
                 "(variables de entorno, parámetros, connection references o configuración central)."
-            )
+            ),
+            repeat_count=total_hits,
         ))
 
     return findings
@@ -738,7 +735,7 @@ def check_delay_usage(
         if isinstance(count, (int, float)) or (isinstance(count, str) and count.strip()):
             findings.append(Finding(
                 severity_level=2,
-                rule_name="Retrasos",
+                rule_name="Retrasos (Delay y Wait)",
                 flow_name=flow_name,
                 action_name=action_name,
                 json_path=f"{base_path}.inputs.interval",
@@ -753,7 +750,7 @@ def check_delay_usage(
         if re.search(r"\b\d+\b", s) or re.search(r"PT\d", s, re.IGNORECASE):
             findings.append(Finding(
                 severity_level=2,
-                rule_name="Retrasos",
+                rule_name="Retrasos (Delay y Wait)",
                 flow_name=flow_name,
                 action_name=action_name,
                 json_path=path,
@@ -1112,7 +1109,7 @@ def check_flow_comments(flow_name: str, flow_raw: Dict[str, Any]) -> List[Findin
     if coverage < 0.33:
         findings.append(Finding(
             severity_level=1,
-            rule_name="Comentarios",
+            rule_name="Comentarios descriptivos",
             flow_name=flow_name,
             action_name="(flow)",
             json_path="actions",

@@ -52,6 +52,22 @@ def _safe_pct(value) -> float:
         return max(0.0, min(float(value or 0), 100.0))
     except (TypeError, ValueError):
         return 0.0
+    
+RULE_DISPLAY_ORDER = {
+    "Hardcode": 1,
+    "Parametrizable": 2,
+    "Manejo de errores (RunAfter)": 3,
+    "Retrasos (Delay y Wait)": 4,
+    "Nomenclatura de actividades": 5,
+    "Nomenclatura de variables": 6,
+    "Nomenclatura de flujos": 7,
+    "Prefijos variables / parámetros": 8,
+    "Condición IF": 9,
+    "Comentarios descriptivos": 10,
+}
+
+def _rule_order(rule_name: str) -> int:
+    return RULE_DISPLAY_ORDER.get(rule_name or "", 999)
 
 
 def _build_analysis_status(compliance_rate: float, total_findings: int) -> dict:
@@ -362,11 +378,11 @@ def select_jsons_view(request, pick_id: str):
         findings,
         key=lambda f: (
             -f.severity_level,
-            f.rule_name.lower(),
+            _rule_order(f.rule_name),
             f.flow_name.lower(),
             f.action_name.lower(),
-        )
     )
+)
 
     findings_dicts = [item.__dict__ for item in findings_sorted[:500]]
 
@@ -413,7 +429,10 @@ def result_view(request, run_id: str):
 
     findings = data.get("findings", [])
     counts = Counter([(f.get("rule_name") or "Unknown") for f in findings])
-    rule_rows = sorted(counts.items(), key=lambda item: (-item[1], item[0].lower()))
+    rule_rows = sorted(
+    counts.items(),
+    key=lambda item: (_rule_order(item[0]), item[0].lower())
+)
     passed_actions_pct = _safe_pct(data.get("passed_actions_pct", 0))
     total_findings = len(findings)
 

@@ -137,9 +137,9 @@
             <td>
               {% if rule == "Hardcode" %}
                 <span class="badge-mini badge-count badge-count--3">{{ cnt }}</span>
-              {% elif rule == "Parametrizable" or rule == "Manejo de errores (RunAfter)" or rule == "Retrasos" %}
+              {% elif rule == "Parametrizable" or rule == "Manejo de errores (RunAfter)" or rule == "Retrasos (Delay y Wait)" %}
                 <span class="badge-mini badge-count badge-count--2">{{ cnt }}</span>
-              {% elif rule == "Nomenclatura de actividades" or rule == "Nomenclatura de variables" or rule == "Prefijos variables / parámetros" or rule == "Nomenclatura de flujos" or rule == "Condición IF" or rule == "Comentarios" %}
+              {% elif rule == "Nomenclatura de actividades" or rule == "Nomenclatura de variables" or rule == "Prefijos variables / parámetros" or rule == "Nomenclatura de flujos" or rule == "Condición IF" or rule == "Comentarios descriptivos" %}
                 <span class="badge-mini badge-count badge-count--1">{{ cnt }}</span>
               {% else %}
                 <span class="badge-mini badge-count">{{ cnt }}</span>
@@ -382,29 +382,41 @@
               <th>Target (Flow / Activity)</th>
               <th>Error Detail</th>
               <th>Suggestion</th>
+              <th>Repeats</th>
+
             </tr>
           </thead>
           <tbody>
-            {% for f in findings %}
-              <tr
-                data-severity="{{ f.severity_level }}"
-                data-rule="{{ f.rule_name }}"
-              >
-                <td>
-                  <span class="severity-pill severity-pill--{{ f.severity_level }}">
-                    Level {{ f.severity_level }}
-                  </span>
-                </td>
-                <td><div class="finding-rule">{{ f.rule_name }}</div></td>
-                <td class="cell-wrap">{{ f.target_pretty }}</td>
-                <td><div class="finding-reason">{{ f.reason }}</div></td>
-                <td class="cell-wrap"><div class="finding-reason">{{ f.suggestion }}</div></td>
-              </tr>
-            {% empty %}
-              <tr>
-                <td colspan="5" class="empty-state-cell">No findings were detected with the current rule set.</td>
-              </tr>
-            {% endfor %}
+  {% for f in findings %}
+    <tr>
+      <td>
+        <span class="severity-pill severity-pill--{{ f.severity_level }}">
+          Level {{ f.severity_level }}
+        </span>
+      </td>
+
+      <td>
+        <div class="finding-rule">{{ f.rule_name }}</div>
+      </td>
+
+      <td class="cell-wrap">{{ f.target_pretty }}</td>
+
+      <td>
+        <div class="finding-label">Reason</div>
+        <div class="finding-reason">{{ f.reason }}</div>
+      </td>
+
+      <td class="cell-wrap">
+        <div class="finding-reason">{{ f.suggestion|default:"-" }}</div>
+      </td>
+
+      <td class="cell-wrap">{{ f.repeat_count|default:1 }}</td>
+    </tr>
+  {% empty %}
+    <tr>
+      <td colspan="6" class="empty-state-cell">No findings were detected with the current rule set.</td>
+    </tr>
+  {% endfor %}
           </tbody>
         </table>
       </div>
