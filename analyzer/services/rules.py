@@ -45,7 +45,7 @@ DELAY_NAME_RE = re.compile(r"\b(delay|wait)\b", re.IGNORECASE)
 
 WINDOWS_PATH_RE = re.compile(r"^[A-Za-z]:\\")
 UNIX_PATH_RE = re.compile(r"^/(?!/).+")
-VARIABLE_NAME_RE = re.compile(r"^(Bln|Int|Flt|Str|Obj|Arr)[A-Z][A-Za-z0-9]*$")
+VARIABLE_NAME_RE = re.compile(r"^(Bln|Num|Str|Obj|Arr)[A-Z][A-Za-z0-9]*$")
 
 CURP_RE = re.compile(
     r"^"
@@ -132,6 +132,21 @@ PARAMETRIZABLE_HINTS = (
     "blob", "container",
 )
 
+TYPE_TO_PREFIX = {
+    "boolean": "Bln",
+    "bool": "Bln",
+
+    "integer": "Num",
+    "number": "Num",
+    "float": "Num",
+    "decimal": "Num",
+    "double": "Num",
+
+    "string": "Str",
+    "object": "Obj",
+    "array": "Arr",
+}
+
 FLOW_NAME_RE = re.compile(r"^[A-Z][A-Za-z0-9_]*$")
 
 IO_PREFIX_RE = re.compile(
@@ -203,6 +218,27 @@ def _walk_values(obj: Any, base_path: str) -> List[Tuple[str, str]]:
 
     return found
 
+def _count_activity_words(name: str) -> int:
+    """
+    Cuenta cuántas palabras tiene el nombre de una actividad
+    usando como separadores:
+    - guion bajo _
+    - espacio
+    - guion -
+
+    Ejemplos:
+    - Validar_Login_Cliente -> 3
+    - Obtener Datos Cuenta -> 3
+    - Crear-Archivo-Conciliacion -> 3
+    - EnviarCorreo -> 1
+    """
+    raw = (name or "").strip()
+    if not raw:
+        return 0
+
+    parts = re.split(r"[_\-\s]+", raw)
+    parts = [p for p in parts if p.strip()]
+    return len(parts)
 
 def _dedupe_pairs(items: List[Tuple[str, str]]) -> List[Tuple[str, str]]:
     seen = set()
@@ -423,8 +459,8 @@ def _extract_initialized_variable_names(
     action_name: str,
     action_raw: Dict[str, Any],
     base_path: str
-) -> List[Tuple[str, str]]:
-    found: List[Tuple[str, str]] = []
+) -> List[Tuple[str, str, str]]:
+    found: List[Tuple[str, str, str]] = []
 
     raw_inputs = action_raw.get("inputs")
     if not isinstance(raw_inputs, dict):
@@ -439,22 +475,35 @@ def _extract_initialized_variable_names(
         for i, item in enumerate(variables):
             if isinstance(item, dict):
                 name = str(item.get("name") or "").strip()
+                declared_type = str(item.get("type") or "").strip().lower()
                 if name:
-                    found.append((f"{base_path}.inputs.variables[{i}].name", name))
+                    found.append((
+                        f"{base_path}.inputs.variables[{i}].name",
+                        name,
+                        declared_type
+                    ))
 
     looks_like_variable_action = (
         "variable" in action_type
         or "initialize_variable" in action_name_low
-        or "set_variable" in action_name_low
     )
 
     if looks_like_variable_action:
-        for key in ("name", "variableName", "variable", "nombre"):
-            value = inputs.get(key)
-            if isinstance(value, str) and value.strip():
-                found.append((f"{base_path}.inputs.{key}", value.strip()))
+        direct_name = inputs.get("name")
+        direct_type = str(inputs.get("type") or "").strip().lower()
 
-    return _dedupe_pairs(found)
+        if isinstance(direct_name, str) and direct_name.strip():
+            found.append((
+                f"{base_path}.inputs.name",
+                direct_name.strip(),
+                direct_type
+            ))
+
+    return found
+
+def _extract_prefix_from_variable_name(var_name: str) -> str:
+    match = re.match(r"^([A-Z][a-z]{2})", var_name or "")
+    return match.group(1) if match else ""
 
 
 def _looks_sensitive_literal(path: str, value: str, action_raw: Dict[str, Any] | None = None) -> bool:
@@ -903,6 +952,7 @@ def check_action_naming_cloud(
 
     default_name_key = _normalize_default_action_name(action_name)
 
+    # 1) Nombre por default
     if DEFAULT_ACTION_NAME_RE.match(default_name_key):
         findings.append(Finding(
             severity_level=1,
@@ -913,9 +963,11 @@ def check_action_naming_cloud(
             reason="Se detectó un nombre por default (Compose, Condition, Apply_to_each, etc.).",
             evidence=f"Nombre: {action_name}",
             impact="Dificulta trazabilidad y mantenimiento porque no se entiende el propósito de la acción sin abrirla.",
-            fix="Renombrar la acción con propósito claro, sin numeración innecesaria."
+            fix="Renombrar la acción con un nombre descriptivo, alineado al estándar definido."
         ))
+        return findings
 
+    # 2) Acentos o ñ
     if re.search(r"[áéíóúñÁÉÍÓÚÑ]", action_name):
         findings.append(Finding(
             severity_level=1,
@@ -926,7 +978,23 @@ def check_action_naming_cloud(
             reason="El nombre contiene acentos o ñ; se recomienda solo ASCII para consistencia.",
             evidence=f"Nombre: {action_name}",
             impact="Inconsistencia de estandarización y posibles diferencias entre equipos o entornos.",
-            fix="Renombrar usando ASCII sin acentos ni caracteres especiales."
+            fix="Renombrar usando solo caracteres ASCII y separadores permitidos."
+        ))
+        return findings
+
+    # 3) Mínimo 3 palabras separadas
+    word_count = _count_activity_words(action_name)
+    if word_count < 3:
+        findings.append(Finding(
+            severity_level=1,
+            rule_name="Nomenclatura de actividades",
+            flow_name=flow_name,
+            action_name=action_name,
+            json_path=base_path,
+            reason="El nombre de la actividad no contiene al menos 3 palabras separadas según el estándar.",
+            evidence=f"Nombre: {action_name} | Palabras detectadas: {word_count}",
+            impact="Reduce claridad y descriptividad en la intención de la actividad.",
+            fix="Renombrar la actividad usando al menos 3 palabras separadas por guion bajo (_), espacio o guion (-)."
         ))
 
     return findings
@@ -940,7 +1008,11 @@ def check_variable_naming(
 ) -> List[Finding]:
     findings: List[Finding] = []
 
-    for path, var_name in _extract_initialized_variable_names(action_name, action_raw, base_path):
+    for path, var_name, declared_type in _extract_initialized_variable_names(action_name, action_raw, base_path):
+        expected_prefix = TYPE_TO_PREFIX.get(declared_type, "")
+        actual_prefix = _extract_prefix_from_variable_name(var_name)
+
+        # 1) Validar formato general
         if not VARIABLE_NAME_RE.match(var_name):
             findings.append(Finding(
                 severity_level=1,
@@ -948,10 +1020,25 @@ def check_variable_naming(
                 flow_name=flow_name,
                 action_name=action_name,
                 json_path=path,
-                reason="La variable no sigue la convención esperada de tipo + UpperCamelCase.",
-                evidence=f"Variable: {var_name}",
+                reason="La variable no sigue la convención esperada de prefijo de tipo + UpperCamelCase.",
+                evidence=f"Variable: {var_name} | Tipo declarado: {declared_type}",
                 impact="Complica lectura del flujo y dificulta inferir rápidamente el tipo o propósito de la variable.",
-                fix="Renombrar la variable usando prefijo de tipo (Bln/Int/Flt/Str/Obj/Arr) y un nombre descriptivo en UpperCamelCase."
+                fix="Renombrar la variable siguiendo el estándar definido en el manual."
+            ))
+            continue
+
+        # 2) Validar que el prefijo coincida con el tipo real
+        if expected_prefix and actual_prefix != expected_prefix:
+            findings.append(Finding(
+                severity_level=1,
+                rule_name="Nomenclatura de variables",
+                flow_name=flow_name,
+                action_name=action_name,
+                json_path=path,
+                reason="El prefijo del nombre de la variable no coincide con el tipo de dato declarado.",
+                evidence=f"Variable: {var_name} | Tipo declarado: {declared_type} | Prefijo esperado: {expected_prefix}",
+                impact="Genera inconsistencia entre el tipo real de la variable y su nomenclatura.",
+                fix=f"Renombrar la variable usando el prefijo {expected_prefix} según el tipo declarado."
             ))
 
     return findings
