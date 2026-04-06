@@ -220,17 +220,15 @@ def _walk_values(obj: Any, base_path: str) -> List[Tuple[str, str]]:
 
 def _count_activity_words(name: str) -> int:
     """
-    Cuenta cuántas palabras tiene el nombre de una actividad
-    usando como separadores:
+    Cuenta palabras separadas por:
     - guion bajo _
     - espacio
     - guion -
 
     Ejemplos:
-    - Validar_Login_Cliente -> 3
-    - Obtener Datos Cuenta -> 3
-    - Crear-Archivo-Conciliacion -> 3
-    - EnviarCorreo -> 1
+    compose_login_cliente -> 3
+    Enviar_Correo_Empleado -> 3
+    delay-pagina-principal -> 3
     """
     raw = (name or "").strip()
     if not raw:
@@ -950,6 +948,7 @@ def check_action_naming_cloud(
     if allowlist_key in {"whenahttprequestisreceived", "recurrence"}:
         return findings
 
+    # Para detectar defaults sí conviene normalizar separadores
     default_name_key = _normalize_default_action_name(action_name)
 
     # 1) Nombre por default
@@ -963,7 +962,7 @@ def check_action_naming_cloud(
             reason="Se detectó un nombre por default (Compose, Condition, Apply_to_each, etc.).",
             evidence=f"Nombre: {action_name}",
             impact="Dificulta trazabilidad y mantenimiento porque no se entiende el propósito de la acción sin abrirla.",
-            fix="Renombrar la acción con un nombre descriptivo, alineado al estándar definido."
+            fix="Renombrar la actividad a un título descriptivo y único, alineado al manual."
         ))
         return findings
 
@@ -975,15 +974,17 @@ def check_action_naming_cloud(
             flow_name=flow_name,
             action_name=action_name,
             json_path=base_path,
-            reason="El nombre contiene acentos o ñ; se recomienda solo ASCII para consistencia.",
+            reason="El nombre contiene acentos o ñ; se debe usar solo la convención ASCII para consistencia.",
             evidence=f"Nombre: {action_name}",
             impact="Inconsistencia de estandarización y posibles diferencias entre equipos o entornos.",
-            fix="Renombrar usando solo caracteres ASCII y separadores permitidos."
+            fix="Renombrar la actividad a un título descriptivo y único, alineado al manual."
         ))
         return findings
 
     # 3) Mínimo 3 palabras separadas
+    # IMPORTANTE: contar sobre el nombre original, no sobre el normalizado
     word_count = _count_activity_words(action_name)
+
     if word_count < 3:
         findings.append(Finding(
             severity_level=1,
@@ -991,10 +992,10 @@ def check_action_naming_cloud(
             flow_name=flow_name,
             action_name=action_name,
             json_path=base_path,
-            reason="El nombre de la actividad no contiene al menos 3 palabras separadas según el estándar.",
+            reason="El nombre de la actividad no cumple con el estándar requerido de al menos tres palabras diferenciadas.",
             evidence=f"Nombre: {action_name} | Palabras detectadas: {word_count}",
             impact="Reduce claridad y descriptividad en la intención de la actividad.",
-            fix="Renombrar la actividad usando al menos 3 palabras separadas por guion bajo (_), espacio o guion (-)."
+            fix="Renombrar la actividad a un título descriptivo y único, alineado al manual."
         ))
 
     return findings
@@ -1038,7 +1039,7 @@ def check_variable_naming(
                 reason="El prefijo del nombre de la variable no coincide con el tipo de dato declarado.",
                 evidence=f"Variable: {var_name} | Tipo declarado: {declared_type} | Prefijo esperado: {expected_prefix}",
                 impact="Genera inconsistencia entre el tipo real de la variable y su nomenclatura.",
-                fix=f"Renombrar la variable usando el prefijo {expected_prefix} según el tipo declarado."
+                fix=f"Renombre la variable siguiendo la convención: Prefijo de Tipo  {expected_prefix} + UpperCamelCase."
             ))
 
     return findings
@@ -1289,7 +1290,7 @@ def check_flow_parameter_prefixes(flow_name: str, flow_raw: Dict[str, Any]) -> L
                     reason="El parámetro de entrada no utiliza el prefijo esperado 'in_'.",
                     evidence=f"Parámetro detectado: {normalized}",
                     impact="Dificulta entender la dirección del dato entre flujos relacionados.",
-                    fix="Renombrar el parámetro usando el prefijo in_ seguido del tipo de dato y un nombre descriptivo."
+                    fix="Renombrar el parámetro usando el prefijo in_ seguido del tipo de dato y un nombre descriptivo (Bln/Int/Str/Obj/Arr)."
                 ))
                 continue
 
@@ -1318,7 +1319,7 @@ def check_flow_parameter_prefixes(flow_name: str, flow_raw: Dict[str, Any]) -> L
                     reason="El parámetro de salida no utiliza el prefijo esperado 'out_' o 'io_'.",
                     evidence=f"Parámetro detectado: {normalized}",
                     impact="Complica el entendimiento de entradas y salidas entre flujos.",
-                    fix="Renombrar el parámetro usando out_ o io_ según corresponda, seguido del tipo y un nombre descriptivo."
+                    fix="Renombrar el parámetro usando out_ o io_ según corresponda, seguido del tipo y un nombre descriptivo (Bln/Int/Str/Obj/Arr)."
                 ))
                 continue
 
