@@ -1278,6 +1278,7 @@ def check_flow_parameter_prefixes(flow_name: str, flow_raw: Dict[str, Any]) -> L
 
     for kind, candidate_name, path in _extract_trigger_and_response_names(flow_raw):
         normalized = candidate_name.strip()
+        display_name = f"title: {candidate_name}"
 
         if kind == "trigger_input":
             if not normalized.startswith("in_"):
@@ -1285,12 +1286,12 @@ def check_flow_parameter_prefixes(flow_name: str, flow_raw: Dict[str, Any]) -> L
                     severity_level=1,
                     rule_name="Prefijos variables / parámetros",
                     flow_name=flow_name,
-                    action_name="(flow)",
+                    action_name=display_name,
                     json_path=path,
-                    reason="El parámetro de entrada no utiliza el prefijo esperado 'in_'.",
+                    reason="El prefijo no corresponde a alguno de los esperados (in/out/io)",
                     evidence=f"Parámetro detectado: {normalized}",
                     impact="Dificulta entender la dirección del dato entre flujos relacionados.",
-                    fix="Renombrar el parámetro usando el prefijo in_ seguido del tipo de dato y un nombre descriptivo (Bln/Int/Str/Obj/Arr)."
+                    fix="Renombrar el parámetro usando el prefijo in_ seguido del tipo de dato y un nombre descriptivo."
                 ))
                 continue
 
@@ -1299,9 +1300,9 @@ def check_flow_parameter_prefixes(flow_name: str, flow_raw: Dict[str, Any]) -> L
                     severity_level=1,
                     rule_name="Prefijos variables / parámetros",
                     flow_name=flow_name,
-                    action_name="(flow)",
+                    action_name=display_name,
                     json_path=path,
-                    reason="El parámetro de entrada no respeta la convención completa de prefijo, tipo y nombre descriptivo.",
+                    reason="El tipo de dato no corresponde al esperado (Bln/Int/Str/Obj/Arr).",
                     evidence=f"Parámetro detectado: {normalized}",
                     impact="Reduce consistencia y dificulta entender el contrato entre flujos.",
                     fix="Usar el formato in_ + tipo (Bln/Int/Flt/Str/Obj/Arr) + nombre descriptivo en UpperCamelCase."
@@ -1314,12 +1315,12 @@ def check_flow_parameter_prefixes(flow_name: str, flow_raw: Dict[str, Any]) -> L
                     severity_level=1,
                     rule_name="Prefijos variables / parámetros",
                     flow_name=flow_name,
-                    action_name="(flow)",
+                    action_name=display_name,
                     json_path=path,
                     reason="El parámetro de salida no utiliza el prefijo esperado 'out_' o 'io_'.",
                     evidence=f"Parámetro detectado: {normalized}",
                     impact="Complica el entendimiento de entradas y salidas entre flujos.",
-                    fix="Renombrar el parámetro usando out_ o io_ según corresponda, seguido del tipo y un nombre descriptivo (Bln/Int/Str/Obj/Arr)."
+                    fix="Renombrar el parámetro usando out_ o io_ según corresponda, seguido del tipo y un nombre descriptivo."
                 ))
                 continue
 
@@ -1328,9 +1329,9 @@ def check_flow_parameter_prefixes(flow_name: str, flow_raw: Dict[str, Any]) -> L
                     severity_level=1,
                     rule_name="Prefijos variables / parámetros",
                     flow_name=flow_name,
-                    action_name="(flow)",
+                    action_name=display_name,
                     json_path=path,
-                    reason="El parámetro de salida no respeta la convención completa de prefijo, tipo y nombre descriptivo.",
+                    reason="El tipo de dato no corresponde al esperado (Bln/Int/Str/Obj/Arr)",
                     evidence=f"Parámetro detectado: {normalized}",
                     impact="Reduce consistencia y dificulta entender el contrato entre flujos.",
                     fix="Usar el formato out_/io_ + tipo (Bln/Int/Flt/Str/Obj/Arr) + nombre descriptivo en UpperCamelCase."
