@@ -246,7 +246,7 @@
 
       <article class="rule-info-card">
         <div class="rule-info-card__head">
-          <h3 class="rule-info-card__title">Nomenclatura de actidades</h3>
+          <h3 class="rule-info-card__title">Nomenclatura de actividades</h3>
           <span class="badge-mini badge-level badge-level--1">Severity 1</span>
         </div>
         <p class="rule-info-card__text">
@@ -408,7 +408,7 @@
       </td>
 
       <td class="cell-wrap">
-        <div class="finding-reason">{{ f.suggestion|default:"-" }}</div>
+        <div class="finding-reason">{{ f.suggestion|safe|default:"-" }}</div>
       </td>
 
       <td class="cell-wrap">{{ f.repeat_count|default:1 }}</td>

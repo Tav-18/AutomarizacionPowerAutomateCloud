@@ -186,7 +186,9 @@ RULE_CATALOG: Dict[str, Dict[str, object]] = {
         "impact_area": "L - Nombre de Argumentos",
         "title": "Nombre de Argumentos",
         "suggestion_es": (
-            "Renombrar parámetros usando in_, out_ o io_ y el tipo de dato según el estándar definido."
+            "Renombrar el parámetro con la estructura: prefijos (in_/out_/io_) + "
+            "(Bln/Int/Str/Obj/Arr) + VariableUpperCamelCase.<br>"
+            "Ejemplo: in_IntNombreEntrada"
         ),
     },
     "Nomenclatura de flujos": {
