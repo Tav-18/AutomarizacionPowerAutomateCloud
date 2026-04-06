@@ -408,7 +408,7 @@
       </td>
 
       <td class="cell-wrap">
-        <div class="finding-reason">{{ f.suggestion|default:"-" }}</div>
+        <div class="finding-reason">{{ f.suggestion|safe|default:"-" }}</div>
       </td>
 
       <td class="cell-wrap">{{ f.repeat_count|default:1 }}</td>
