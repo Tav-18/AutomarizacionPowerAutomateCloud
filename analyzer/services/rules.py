@@ -181,6 +181,9 @@ DYNAMIC_REF_RE = re.compile(
     re.IGNORECASE
 )
 
+FLOW_NAME_RE = re.compile(
+    r"^[A-Z][A-Za-z0-9]*_[A-Z][A-Za-z0-9]*$"
+)
 
 # =========================
 # Model
@@ -1394,7 +1397,7 @@ def check_flow_naming(flow_name: str) -> List[Finding]:
             reason="El nombre del flujo contiene acentos o ñ.",
             evidence=f"Nombre del flujo: {base_name}",
             impact="Genera inconsistencia de nomenclatura dentro de la solución.",
-            fix="Renombrar el flujo usando solo ASCII, sin acentos ni caracteres especiales."
+            fix="Renombrar el flujo usando solo ASCII y el formato UpperCamelCase_UpperCamelCase."
         ))
         return findings
 
@@ -1408,26 +1411,24 @@ def check_flow_naming(flow_name: str) -> List[Finding]:
             reason="El nombre del flujo contiene espacios.",
             evidence=f"Nombre del flujo: {base_name}",
             impact="Reduce uniformidad y dificulta mantener una convención consistente.",
-            fix="Renombrar el flujo sin espacios y con una convención uniforme."
+            fix="Renombrar el flujo usando el formato UpperCamelCase_UpperCamelCase, sin espacios."
         ))
         return findings
 
-    # marcar solo si tiene caracteres especiales realmente problemáticos
-    if re.search(r"[^A-Za-z0-9_]", base_name):
+    if not FLOW_NAME_RE.match(base_name):
         findings.append(Finding(
             severity_level=1,
             rule_name="Nomenclatura de flujos",
             flow_name=flow_name,
             action_name="(flow)",
             json_path="flow_name",
-            reason="El nombre del flujo contiene caracteres especiales no recomendados.",
+            reason="El nombre del flujo no cumple con el estándar UpperCamelCase_UpperCamelCase.",
             evidence=f"Nombre del flujo: {base_name}",
-            impact="Dificulta mantener una convención clara y uniforme dentro de la solución.",
-            fix="Usar letras, números y guion bajo, evitando caracteres especiales innecesarios."
+            impact="Dificulta mantener una convención clara, homogénea y fácil de identificar.",
+            fix="Renombrar el flujo con dos bloques descriptivos en UpperCamelCase separados por un solo guion bajo. Ejemplo: ProcesoPrincipal_ValidacionCuenta."
         ))
 
     return findings
-
 
 def run_flow_level_rules(flow_name: str, flow_raw: Dict[str, Any]) -> List[Finding]:
     findings: List[Finding] = []
