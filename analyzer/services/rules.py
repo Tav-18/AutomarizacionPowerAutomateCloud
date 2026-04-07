@@ -1425,7 +1425,7 @@ def check_flow_naming(flow_name: str) -> List[Finding]:
             reason="El nombre del flujo no cumple con el estándar UpperCamelCase_UpperCamelCase.",
             evidence=f"Nombre del flujo: {base_name}",
             impact="Dificulta mantener una convención clara, homogénea y fácil de identificar.",
-            fix="Renombrar el flujo con dos bloques descriptivos en UpperCamelCase separados por un solo guion bajo. Ejemplo: ProcesoPrincipal_ValidacionCuenta."
+            fix= "Debe incluir prefijo de la acción principal + “_” + UpperCamelCase sin espacios (ej. ProcesoPrincipal_ValidacionCuenta) y sin acentos ni caracteres especiales."
         ))
 
     return findings
